@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hirewise",
+  "main": "worker-entry.ts",
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "observability": { "enabled": true },
+  // Every 5 minutes: run pending candidate evaluations. Once a day: delete expired data.
+  "triggers": { "crons": ["*/5 * * * *"] },
+  "routes": [{ "pattern": "hire.clearwise.me", "custom_domain": true }],
+  "d1_databases": [{ "binding": "DB", "database_name": "hirewise", "database_id": "REPLACE_WITH_D1_ID" }],
+  // Public values only. Secrets (keys, passwords) are set in the Cloudflare dashboard, never here.
+  "vars": {
+    "APP_URL": "https://hire.clearwise.me",
+    "AI_MODEL": "claude-sonnet-5-5",
+    "GROW_API_URL": "https://api.grow.business",
+    "MAIL_FROM": "Hirewise <no-reply@clearwise.me>",
+    "RETENTION_MONTHS": "12"
+  }
+}

@@ -1,0 +1,36 @@
+# Local environment (copy to .dev.vars). On the live site, secrets are set in the Cloudflare dashboard.
+APP_URL="http://localhost:8787"
+
+# AI (question generation, translation and candidate evaluation)
+ANTHROPIC_API_KEY=""
+AI_MODEL="claude-sonnet-5-5"
+
+# Email (login links, "candidate finished" alerts) through Resend
+RESEND_API_KEY=""
+MAIL_FROM="Hirewise <no-reply@clearwise.me>"
+# During testing: every email goes to this address instead
+TEST_EMAIL=""
+
+# Israel payments (ILS): Grow through Make, like Clearwise. Or directly via Grow Light API when all four GROW_* exist.
+MAKE_WEBHOOK_URL=""
+MAKE_SECRET=""
+PAYMENT_HOOK_SECRET=""
+GROW_API_URL="https://api.grow.business"
+GROW_USER_ID=""
+GROW_PAGE_CODE=""
+GROW_API_KEY=""
+
+# International payments (USD/EUR/GBP): Paddle
+PADDLE_API_KEY=""
+PADDLE_WEBHOOK_SECRET=""
+PADDLE_CLIENT_TOKEN=""
+PADDLE_ENV="sandbox"
+
+# Admin screen (/admin) initial password
+ADMIN_KEY=""
+# Scheduler secret (/api/cron/<secret>)
+CRON_SECRET=""
+
+# Local testing only. Never set these on the live site.
+DEMO_PAYMENTS=""
+DEV_SHOW_LINKS=""
