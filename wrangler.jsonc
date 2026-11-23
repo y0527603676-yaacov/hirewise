@@ -9,7 +9,7 @@
   // Every 5 minutes: run pending candidate evaluations. Once a day: delete expired data.
   "triggers": { "crons": ["*/5 * * * *"] },
   "routes": [{ "pattern": "hire.clearwise.me", "custom_domain": true }],
-  "d1_databases": [{ "binding": "DB", "database_name": "hirewise", "database_id": "REPLACE_WITH_D1_ID" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "hirewise", "database_id": "ea2b0282-61d4-4b08-a339-66dbde46b45a" }],
   // Public values only. Secrets (keys, passwords) are set in the Cloudflare dashboard, never here.
   "vars": {
     "APP_URL": "https://hire.clearwise.me",
