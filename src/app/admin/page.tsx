@@ -7,6 +7,7 @@ import { aiEnabled } from "@/lib/ai";
 import { mailConfigured } from "@/lib/mail";
 import { CURRENCIES, PACKS, PACK_CREDITS } from "@/lib/core/pricing";
 import { adminGrant, adminLogin, adminSavePrices, adminSeed } from "../actions";
+import { CopySecret } from "@/components/copy-secret";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +80,18 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
       <section className="card">
         <h2 className="h2">הכנסות</h2>
         <p className="mt-2 text-sm">{revenue.length ? revenue.map((r) => `${(r.s / 100).toLocaleString("he-IL")} ${r.currency} (${r.n} רכישות)`).join(" · ") : "עוד אין רכישות."}</p>
+      </section>
+
+      <section className="card">
+        <h2 className="h2">חיבור TileVision</h2>
+        {process.env.PARTNER_KEY_TILEVISION ? (
+          <div className="mt-2 space-y-2 text-sm">
+            <p>זה מפתח החיבור. ב-Vercel, בפרויקט tilevision, מוסיפים משתנה בשם <b dir="ltr">HIREWISE_PARTNER_KEY</b> ומדביקים בו את המפתח הזה, ואז עושים Redeploy.</p>
+            <CopySecret value={process.env.PARTNER_KEY_TILEVISION} />
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-ink/60">המפתח עוד לא הוגדר.</p>
+        )}
       </section>
 
       <section className="card">
