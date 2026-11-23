@@ -56,7 +56,7 @@ export default async function Dashboard() {
             <Link key={j.id} href={`/app/jobs/${j.id}`} className="card block transition hover:-translate-y-0.5 hover:border-brand/30">
               <div className="flex items-start justify-between gap-2">
                 <h2 className="font-bold leading-snug">{j.title}</h2>
-                <span className={`badge ${j.status === "ACTIVE" ? "bg-mint/10 text-mint" : "bg-ink/5 text-ink/50"}`}>{t(j.status === "ACTIVE" ? "jobStatusACTIVE" : "jobStatusCLOSED")}</span>
+                <span className={`badge ${j.status === "ACTIVE" ? "bg-mint/10 text-mint" : j.status === "FAILED" ? "bg-red-50 text-red-700" : j.status === "GENERATING" ? "bg-indigo-50 text-brand" : "bg-ink/5 text-ink/50"}`}>{t(`jobStatus${j.status}` as never)}</span>
               </div>
               {j.department && <p className="mt-0.5 text-sm text-ink/50">{j.department}</p>}
               <p className="mt-4 flex items-center gap-1.5 text-sm text-ink/60"><Users className="h-4 w-4" />{t("jobCandidates", { n: count(j.id) })}</p>

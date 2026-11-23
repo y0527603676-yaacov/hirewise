@@ -8,7 +8,8 @@ import { candidates, candidateSubmissions, evaluationReports } from "@/lib/schem
 import { baseAssessment, getOwnedJob, parseAssessment } from "@/lib/jobs";
 import { fmtDate, safeJson, userLocale, userT } from "@/lib/view";
 import { appUrl } from "@/lib/constants";
-import { toggleJobAction } from "@/app/actions";
+import { retryGenerationAction, toggleJobAction } from "@/app/actions";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { CandidateLink, RegenerateButton } from "@/components/forms/job-tools";
 import { StatusBadge } from "@/components/status";
 import { Notice } from "@/components/ui";
@@ -44,16 +45,24 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
           <h1 className="h1 mt-1">{job.title}</h1>
           <p className="mt-1 text-sm text-ink/55">{[job.department, t(`j${job.jurisdiction}` as never)].filter(Boolean).join(" · ")}</p>
         </div>
-        <form action={toggleJobAction}>
+        {(job.status === "ACTIVE" || job.status === "CLOSED") && <form action={toggleJobAction}>
           <input type="hidden" name="id" value={job.id} />
           <button className="btn-outline">{job.status === "ACTIVE" ? t("closeJob") : t("reopenJob")}</button>
-        </form>
+        </form>}
       </div>
 
       <section className="card">
         <h2 className="h2">{t("jobLinkTitle")}</h2>
         <p className="mt-1 text-sm text-ink/60">{t("jobLinkHint")}</p>
-        {setup ? (
+        {job.status === "GENERATING" ? (
+          <div className="mt-4"><Notice>{t("jobStatusGENERATING")}<AutoRefresh seconds={6} /></Notice></div>
+        ) : job.status === "FAILED" ? (
+          <form action={retryGenerationAction} className="mt-4 flex flex-wrap items-center gap-3">
+            <Notice tone="error">{t("jobStatusFAILED")}</Notice>
+            <input type="hidden" name="id" value={job.id} />
+            <button className="btn-outline">{t("retryGen")}</button>
+          </form>
+        ) : setup ? (
           <div className="mt-4"><Notice tone="warn">{t("setupNeeded")} <Link className="font-semibold underline" href="/app/settings">{t("goSettings")}</Link></Notice></div>
         ) : job.status !== "ACTIVE" ? (
           <div className="mt-4"><Notice tone="warn">{t("cClosed")}</Notice></div>

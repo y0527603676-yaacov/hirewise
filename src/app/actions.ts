@@ -103,7 +103,7 @@ export async function toggleJobAction(form: FormData) {
   const id = String(form.get("id"));
   const db = await getDb();
   const [job] = await db.select().from(jobProfiles).where(eq(jobProfiles.id, id)).limit(1);
-  if (job && job.userId === user.id) await db.update(jobProfiles).set({ status: job.status === "ACTIVE" ? "CLOSED" : "ACTIVE" }).where(eq(jobProfiles.id, id));
+  if (job && job.userId === user.id && (job.status === "ACTIVE" || job.status === "CLOSED")) await db.update(jobProfiles).set({ status: job.status === "ACTIVE" ? "CLOSED" : "ACTIVE" }).where(eq(jobProfiles.id, id));
   revalidatePath(`/app/jobs/${id}`);
 }
 
@@ -236,4 +236,12 @@ export async function suggestFieldAction(input: {
   } catch {
     return { ok: false, code: "ai_failed" };
   }
+}
+
+export async function retryGenerationAction(form: FormData) {
+  const user = await requireUser();
+  const id = String(form.get("id"));
+  const { getOwnedJob, retryGeneration } = await import("@/lib/jobs");
+  if (await getOwnedJob(user, id)) await retryGeneration(id);
+  revalidatePath(`/app/jobs/${id}`);
 }

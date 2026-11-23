@@ -6,8 +6,8 @@
   "compatibility_flags": ["nodejs_compat"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   "observability": { "enabled": true },
-  // Every 5 minutes: run pending candidate evaluations. Once a day: delete expired data.
-  "triggers": { "crons": ["*/5 * * * *"] },
+  // Every minute: write questions for waiting roles and run pending evaluations. Once a day: delete expired data.
+  "triggers": { "crons": ["* * * * *"] },
   "routes": [{ "pattern": "hire.clearwise.me", "custom_domain": true }],
   "d1_databases": [{ "binding": "DB", "database_name": "hirewise", "database_id": "ea2b0282-61d4-4b08-a339-66dbde46b45a" }],
   // Public values only. Secrets (keys, passwords) are set in the Cloudflare dashboard, never here.

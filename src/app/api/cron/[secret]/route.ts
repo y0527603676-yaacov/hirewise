@@ -3,6 +3,7 @@ import { timingSafeEqual } from "crypto";
 import { processPending } from "@/lib/evaluation";
 import { closeStaleAttempts } from "@/lib/candidate";
 import { dailyCleanup } from "@/lib/retention";
+import { processPendingJobs } from "@/lib/jobs";
 
 /** Called by the Worker's scheduler every 5 minutes */
 export async function GET(_req: Request, { params }: { params: Promise<{ secret: string }> }) {
@@ -12,7 +13,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ secret:
   const b = Buffer.from(expected);
   if (!expected || a.length !== b.length || !timingSafeEqual(a, b)) return NextResponse.json({ ok: false }, { status: 404 });
   await closeStaleAttempts().catch((e) => console.error("stale", e));
+  const jobs = await processPendingJobs().catch((e) => (console.error("jobs", e), []));
   const evals = await processPending().catch((e) => (console.error("pending", e), []));
   const cleanup = await dailyCleanup().catch((e) => (console.error("cleanup", e), null));
-  return NextResponse.json({ ok: true, evals, cleanup });
+  return NextResponse.json({ ok: true, jobs, evals, cleanup });
 }

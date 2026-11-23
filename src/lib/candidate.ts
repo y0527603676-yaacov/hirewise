@@ -12,7 +12,7 @@ import { integrityOf } from "./scoring";
 import { background } from "./cf";
 import { scheduleEvaluation } from "./evaluation";
 import { mailConfigured, mailHtml, sendMail } from "./mail";
-import { appUrl } from "./constants";
+import { appUrl, notifyAddress } from "./constants";
 import { getT, isLocale, type Locale } from "@/i18n";
 
 export const CAND_COOKIE = "hw_cand";
@@ -177,11 +177,12 @@ async function finish(ctx: Ctx, s: RoomState) {
   if (answered < 2) return;
   await scheduleEvaluation(ctx.sub.id);
   const [owner] = await db.select().from(users).where(eq(users.id, ctx.job.userId)).limit(1);
-  if (owner && mailConfigured()) {
+  const to = owner ? notifyAddress(owner) : "";
+  if (owner && to && mailConfigured()) {
     const loc = (isLocale(owner.locale) ? owner.locale : "en") as Locale;
     const t = getT(loc);
     const vars = { name: ctx.cand.fullName, role: ctx.job.title };
-    background(sendMail({ to: owner.email, subject: t("mailDoneSubject", vars), html: mailHtml(loc, { lines: [t("mailDoneBody", vars)], button: { label: t("mailDoneBtn"), href: `${appUrl()}/app/jobs/${ctx.job.id}` } }) }));
+    background(sendMail({ to, subject: t("mailDoneSubject", vars), html: mailHtml(loc, { lines: [t("mailDoneBody", vars)], button: { label: t("mailDoneBtn"), href: `${appUrl()}/app/jobs/${ctx.job.id}` } }) }));
   }
 }
 

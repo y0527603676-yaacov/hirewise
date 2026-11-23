@@ -24,7 +24,16 @@ const DDL: string[] = [
 ];
 
 /** Later additions to existing tables. Each runs alone; a failure ("column exists") is skipped. */
-const MIGRATIONS: string[] = [];
+const MIGRATIONS: string[] = [
+  // Partner accounts (a store opened through a partner platform such as TileVision)
+  "ALTER TABLE users ADD COLUMN partner TEXT",
+  "ALTER TABLE users ADD COLUMN external_id TEXT",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_partner_ext ON users(partner, external_id)",
+  // Background question writing for roles created through the partner API
+  "ALTER TABLE job_profiles ADD COLUMN gen_attempts INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE job_profiles ADD COLUMN gen_started_at INTEGER",
+  "ALTER TABLE job_profiles ADD COLUMN role_key TEXT",
+];
 
 const g = globalThis as unknown as { __hwSchemaReady?: boolean };
 

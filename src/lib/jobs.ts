@@ -161,3 +161,77 @@ export async function regenerate(user: User, jobId: string): Promise<"ok" | "loc
   await db.update(jobProfiles).set({ baseLocale: locale }).where(eq(jobProfiles.id, jobId));
   return "ok";
 }
+
+// ---------- Roles created without waiting (partner API): questions are written in the background ----------
+
+/** Validates and checks compliance now; the AI writes the questions in the background (see generateForJob). */
+export async function createJobPending(user: User, raw: Record<string, unknown>, roleKey?: string): Promise<JobFormResult> {
+  const f = cleanForm(raw);
+  const missing = REQUIRED.filter((k) => f[k].length < 2);
+  if (missing.length) return { ok: false, code: "missing", fields: missing };
+  const locale = (isLocale(user.locale) ? user.locale : "he") as Locale;
+  const issues = await checkCompliance(f, locale);
+  if (issues.length) return { ok: false, code: "compliance", issues, jurisdiction: f.jurisdiction as Jurisdiction };
+  if (!aiEnabled()) return { ok: false, code: "ai_off" };
+  const db = await getDb();
+  const jobId = newId();
+  await db.insert(jobProfiles).values({
+    id: jobId, userId: user.id, title: f.title, department: f.department || null, employmentType: f.employmentType, locationType: f.locationType,
+    jurisdiction: f.jurisdiction, responsibilities: f.responsibilities, requiredSkills: f.requiredSkills, uniqueSlug: newSlug(), baseLocale: locale,
+    status: "GENERATING", roleKey: roleKey ? String(roleKey).slice(0, 40) : null, createdAt: new Date(),
+  });
+  await db.insert(managerQuestionnaires).values({
+    id: newId(), jobProfileId: jobId, paceOfWork: f.paceOfWork, pressureLevel: f.pressureLevel, autonomyVsSupervision: f.autonomyVsSupervision,
+    teamDynamics: f.teamDynamics, criticalTraits: f.criticalTraits, nonNegotiables: f.nonNegotiables, behavioralRedLines: f.behavioralRedLines,
+  });
+  const { background } = await import("./cf");
+  await background(generateForJob(jobId));
+  return { ok: true, jobId };
+}
+
+const GEN_MAX_ATTEMPTS = 3;
+
+/** Writes the questions for a GENERATING role. Only one caller claims it; a claim older than 5 minutes may be retaken. */
+export async function generateForJob(jobId: string): Promise<"done" | "skipped" | "failed"> {
+  const { rawDb } = await import("./db");
+  const DB = await rawDb();
+  const now = Date.now();
+  const claim = await DB.prepare(
+    `UPDATE job_profiles SET gen_started_at = ?, gen_attempts = gen_attempts + 1
+     WHERE id = ? AND status = 'GENERATING' AND gen_attempts < ? AND (gen_started_at IS NULL OR gen_started_at < ?)`,
+  )
+    .bind(now, jobId, GEN_MAX_ATTEMPTS, now - 5 * 60_000)
+    .run();
+  if (!claim.meta?.changes) return "skipped";
+  const full = await getJobFull(jobId);
+  if (!full) return "skipped";
+  const db = await getDb();
+  try {
+    const content = await generateAssessment(toJobInput({ ...full.job, ...full.q }), (isLocale(full.job.baseLocale) ? full.job.baseLocale : "he") as Locale);
+    await db.delete(assessments).where(eq(assessments.jobProfileId, jobId));
+    await db.insert(assessments).values({ id: newId(), jobProfileId: jobId, locale: full.job.baseLocale, isBase: true, questions: JSON.stringify(content), createdAt: new Date() });
+    await db.update(jobProfiles).set({ status: "ACTIVE" }).where(eq(jobProfiles.id, jobId));
+    return "done";
+  } catch {
+    const [j] = await db.select().from(jobProfiles).where(eq(jobProfiles.id, jobId)).limit(1);
+    // Let the next run retry right away; after the last attempt the role is marked as failed
+    await db.update(jobProfiles).set({ genStartedAt: null, status: (j?.genAttempts ?? GEN_MAX_ATTEMPTS) >= GEN_MAX_ATTEMPTS ? "FAILED" : "GENERATING" }).where(eq(jobProfiles.id, jobId));
+    return "failed";
+  }
+}
+
+/** Scheduler: writes questions for roles still waiting */
+export async function processPendingJobs(limit = 3) {
+  const db = await getDb();
+  const rows = await db.select({ id: jobProfiles.id }).from(jobProfiles).where(eq(jobProfiles.status, "GENERATING")).limit(limit);
+  const out: string[] = [];
+  for (const r of rows) out.push(await generateForJob(r.id));
+  return out;
+}
+
+/** Retry a role whose question writing failed */
+export async function retryGeneration(jobId: string) {
+  const db = await getDb();
+  await db.update(jobProfiles).set({ status: "GENERATING", genAttempts: 0, genStartedAt: null }).where(and(eq(jobProfiles.id, jobId), eq(jobProfiles.status, "FAILED")));
+  return generateForJob(jobId);
+}

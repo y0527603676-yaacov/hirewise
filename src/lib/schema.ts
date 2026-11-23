@@ -16,6 +16,8 @@ export const users = sqliteTable("users", {
   totalUsedCredits: integer("total_used_credits").notNull().default(0),
   lockedEvals: integer("locked_evals").notNull().default(0),
   everPurchased: integer("ever_purchased", { mode: "boolean" }).notNull().default(false),
+  partner: text("partner"),
+  externalId: text("external_id"),
   createdAt: ts("created_at").notNull(),
   lastSeenAt: ts("last_seen_at"),
 });
@@ -46,7 +48,10 @@ export const jobProfiles = sqliteTable("job_profiles", {
   responsibilities: text("responsibilities").notNull(),
   requiredSkills: text("required_skills").notNull(),
   uniqueSlug: text("unique_slug").notNull().unique(),
-  status: text("status").notNull().default("ACTIVE"), // ACTIVE | CLOSED
+  status: text("status").notNull().default("ACTIVE"), // ACTIVE | CLOSED | GENERATING | FAILED
+  genAttempts: integer("gen_attempts").notNull().default(0),
+  genStartedAt: ts("gen_started_at"),
+  roleKey: text("role_key"),
   baseLocale: text("base_locale").notNull().default("en"),
   createdAt: ts("created_at").notNull(),
 });
