@@ -184,14 +184,13 @@ export async function createJobPending(user: User, raw: Record<string, unknown>,
     id: newId(), jobProfileId: jobId, paceOfWork: f.paceOfWork, pressureLevel: f.pressureLevel, autonomyVsSupervision: f.autonomyVsSupervision,
     teamDynamics: f.teamDynamics, criticalTraits: f.criticalTraits, nonNegotiables: f.nonNegotiables, behavioralRedLines: f.behavioralRedLines,
   });
-  const { background } = await import("./cf");
-  await background(generateForJob(jobId));
+  // Written by the scheduler within a minute (background work after a response is cut off at 30 seconds)
   return { ok: true, jobId };
 }
 
 const GEN_MAX_ATTEMPTS = 3;
 
-/** Writes the questions for a GENERATING role. Only one caller claims it; a claim older than 5 minutes may be retaken. */
+/** Writes the questions for a GENERATING role. Only one caller claims it; a claim older than 2.5 minutes may be retaken. */
 export async function generateForJob(jobId: string): Promise<"done" | "skipped" | "failed"> {
   const { rawDb } = await import("./db");
   const DB = await rawDb();
@@ -200,7 +199,7 @@ export async function generateForJob(jobId: string): Promise<"done" | "skipped" 
     `UPDATE job_profiles SET gen_started_at = ?, gen_attempts = gen_attempts + 1
      WHERE id = ? AND status = 'GENERATING' AND gen_attempts < ? AND (gen_started_at IS NULL OR gen_started_at < ?)`,
   )
-    .bind(now, jobId, GEN_MAX_ATTEMPTS, now - 5 * 60_000)
+    .bind(now, jobId, GEN_MAX_ATTEMPTS, now - 150_000)
     .run();
   if (!claim.meta?.changes) return "skipped";
   const full = await getJobFull(jobId);

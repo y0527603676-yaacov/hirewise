@@ -13,6 +13,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const db = await getDb();
   const [row] = await db.select({ s: candidateSubmissions, j: jobProfiles }).from(candidateSubmissions).innerJoin(jobProfiles, eq(jobProfiles.id, candidateSubmissions.jobProfileId)).where(eq(candidateSubmissions.id, id)).limit(1);
   if (!row || row.j.userId !== user.id) return NextResponse.json({ ok: false }, { status: 404 });
-  const result = row.s.evalStatus === "PENDING" || (row.s.evalStatus === "FAILED" && row.s.evalAttempts < 3) ? await runEvaluation(id) : "skipped";
+  // runEvaluation claims it only if it is waiting, failed, or a run that stopped midway (it decides atomically)
+  const result = row.s.evalStatus === "DONE" || row.s.evalStatus === "DEFERRED" ? "skipped" : await runEvaluation(id);
   return NextResponse.json({ ok: true, result });
 }

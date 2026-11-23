@@ -15,6 +15,6 @@ export function StatusBadge({ t, sub, report }: { t: T; sub: Submission; report:
     );
   }
   if (sub.evalStatus === "DEFERRED") return <span className="badge bg-amber-50 text-amber-700">{t("evDeferred")}</span>;
-  if (sub.evalStatus === "FAILED" && sub.evalAttempts >= 3) return <span className="badge bg-red-50 text-red-700">{t("evFailed")}</span>;
+  if (sub.evalStatus === "FAILED" && sub.evalAttempts >= 4) return <span className="badge bg-red-50 text-red-700">{t("evFailed")}</span>;
   return <span className="badge bg-indigo-50 text-brand">{t("evPending")}</span>;
 }

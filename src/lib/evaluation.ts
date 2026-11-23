@@ -7,11 +7,16 @@ import { secondsUsed, type Answers } from "./core/room";
 import { evaluate } from "./ai";
 import { getJobFull, parseAssessment, toJobInput } from "./jobs";
 import { integrityOf } from "./scoring";
-import { background } from "./cf";
 import { noteOps } from "./mail";
 import { isLocale, type Locale } from "@/i18n";
 
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 4;
+/**
+ * An evaluation takes about 30-60 seconds. Work started "in the background" after a response is cut off by
+ * Cloudflare after 30 seconds, so evaluations run only where they can finish: the scheduler (every minute) or a
+ * request that waits for the result (the employer's report page). A run that stopped midway is retaken after this:
+ */
+const STALE_MS = 150_000;
 const wallet = (u: User) => ({ freeCredits: u.freeCredits, purchasedCredits: u.purchasedCredits, lockedEvals: u.lockedEvals, everPurchased: u.everPurchased });
 
 /** Called once when an attempt completes: evaluate now, or wait for an unlock (cost cap) */
@@ -23,8 +28,8 @@ export async function scheduleEvaluation(subId: string) {
   const [owner] = job ? await db.select().from(users).where(eq(users.id, job.userId)).limit(1) : [];
   if (!owner) return;
   const decision = evalDecision(wallet(owner));
+  // The scheduler picks it up within a minute; the employer's report page runs it at once if open
   await db.update(candidateSubmissions).set({ evalStatus: decision === "evaluate" ? "PENDING" : "DEFERRED" }).where(eq(candidateSubmissions.id, subId));
-  if (decision === "evaluate") background(runEvaluation(subId));
 }
 
 /** Atomically takes 1 credit of the given kind. Returns false when none is left. */
@@ -44,9 +49,10 @@ async function refundCredit(userId: string, kind: "FREE" | "CREDIT") {
 export async function runEvaluation(subId: string): Promise<"done" | "skipped" | "failed"> {
   const DB = await rawDb();
   const claim = await DB.prepare(
-    `UPDATE candidate_submissions SET eval_status = 'RUNNING', eval_started_at = ?, eval_attempts = eval_attempts + 1 WHERE id = ? AND eval_status IN ('PENDING', 'FAILED') AND eval_attempts < ?`,
+    `UPDATE candidate_submissions SET eval_status = 'RUNNING', eval_started_at = ?, eval_attempts = eval_attempts + 1
+     WHERE id = ? AND eval_attempts < ? AND (eval_status IN ('PENDING', 'FAILED') OR (eval_status = 'RUNNING' AND eval_started_at < ?))`,
   )
-    .bind(Date.now(), subId, MAX_ATTEMPTS)
+    .bind(Date.now(), subId, MAX_ATTEMPTS, Date.now() - STALE_MS)
     .run();
   if (!claim.meta?.changes) return "skipped";
   const db = await getDb();
@@ -133,7 +139,6 @@ export async function unlockSubmission(user: User, subId: string): Promise<Unloc
   }
   await putSetting(`prepaid.${subId}`, source);
   await db.update(candidateSubmissions).set({ evalStatus: "PENDING", evalAttempts: 0 }).where(and(eq(candidateSubmissions.id, subId), inArray(candidateSubmissions.evalStatus, ["DEFERRED", "FAILED"])));
-  background(runEvaluation(subId));
   return "ok";
 }
 
@@ -152,7 +157,7 @@ export async function processPending(limit = 4) {
   await db
     .update(candidateSubmissions)
     .set({ evalStatus: "PENDING" })
-    .where(and(eq(candidateSubmissions.evalStatus, "RUNNING"), lt(candidateSubmissions.evalStartedAt, new Date(Date.now() - 10 * 60_000))));
+    .where(and(eq(candidateSubmissions.evalStatus, "RUNNING"), lt(candidateSubmissions.evalStartedAt, new Date(Date.now() - STALE_MS))));
   const todo = await db
     .select({ id: candidateSubmissions.id })
     .from(candidateSubmissions)

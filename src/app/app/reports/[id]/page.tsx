@@ -58,7 +58,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
           {balance(user) === 0 && <Link href="/app/wallet" className="block text-sm font-semibold text-brand hover:underline">{t("buyCredits")}</Link>}
         </div>
       );
-    else if (s.evalStatus === "FAILED" && s.evalAttempts >= 3)
+    else if (s.evalStatus === "FAILED" && s.evalAttempts >= 4)
       body = (
         <div className="space-y-3">
           <p className="text-ink/65">{t("evalFailed")}</p>
