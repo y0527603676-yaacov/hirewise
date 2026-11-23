@@ -30,7 +30,7 @@ export async function jobBySlug(slug: string) {
 export type StartResult = { ok: true } | { ok: false; code: "closed" | "already" | "invalid" | "ai_failed"; fields?: string[] };
 
 /** Starts (or resumes) the assessment for a candidate. One attempt per email per role. */
-export async function startAssessment(slug: string, raw: { fullName: string; email: string; phone: string; locale: string; accommodation: boolean; consent: boolean }): Promise<StartResult> {
+export async function startAssessment(slug: string, raw: { fullName: string; email: string; phone: string; locale: string; accommodation: boolean; consent: boolean; address?: string }): Promise<StartResult> {
   const found = await jobBySlug(slug);
   if (!found || found.job.status !== "ACTIVE" || !found.owner.company || !found.owner.contactEmail) return { ok: false, code: "closed" };
   const fullName = raw.fullName.trim().replace(/\s+/g, " ").slice(0, 100);
@@ -62,7 +62,7 @@ export async function startAssessment(slug: string, raw: { fullName: string; ema
 
   let assessment;
   try {
-    assessment = await assessmentFor(found.job, locale);
+    assessment = await assessmentFor(found.job, locale, raw.address === "m" || raw.address === "f" ? raw.address : null);
   } catch {
     return { ok: false, code: "ai_failed" };
   }
@@ -109,7 +109,7 @@ async function persist(ctx: Ctx, s: RoomState) {
 export type RoomView =
   | { state: "none" }
   | { state: "done"; name: string; company: string }
-  | { state: "question"; index: number; total: number; question: { id: string; title: string; scenario: string; prompt: string }; limit: number; remaining: number; draft: string; keystrokes: number; intro: string };
+  | { state: "question"; index: number; total: number; question: { id: string; kind: "scenario" | "experience"; title: string; scenario: string; prompt: string }; limit: number; remaining: number; draft: string; keystrokes: number; intro: string };
 
 async function view(ctx: Ctx, s: RoomState): Promise<RoomView> {
   if (s.done || ctx.sub.status !== "IN_PROGRESS") {
@@ -120,7 +120,7 @@ async function view(ctx: Ctx, s: RoomState): Promise<RoomView> {
   const q = ctx.qs[s.index];
   const a = s.answers[q.id];
   const limit = effectiveLimit(q.timeLimitSec, ctx.cand.accommodation);
-  return { state: "question", index: s.index, total: ctx.qs.length, question: { id: q.id, title: q.title, scenario: q.scenario, prompt: q.prompt }, limit, remaining: Math.max(0, remaining(a.servedAt, limit)), draft: a.text, keystrokes: a.keystrokes, intro: s.index === 0 ? ctx.intro : "" };
+  return { state: "question", index: s.index, total: ctx.qs.length, question: { id: q.id, kind: q.kind, title: q.title, scenario: q.scenario, prompt: q.prompt }, limit, remaining: Math.max(0, remaining(a.servedAt, limit)), draft: a.text, keystrokes: a.keystrokes, intro: s.index === 0 ? ctx.intro : "" };
 }
 
 export async function roomState(slug: string): Promise<RoomView> {

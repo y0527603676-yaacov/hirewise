@@ -5,9 +5,9 @@ import { Loader2, PlayCircle } from "lucide-react";
 import { startAssessmentAction } from "@/app/actions";
 import type { Dict } from "@/i18n/en";
 
-export function BriefingForm({ d, slug, locale }: { d: Dict; slug: string; locale: string }) {
+export function BriefingForm({ d, slug, locale, gendered }: { d: Dict; slug: string; locale: string; gendered: boolean }) {
   const router = useRouter();
-  const [f, setF] = useState({ fullName: "", email: "", phone: "", accommodation: false, consent: false });
+  const [f, setF] = useState({ fullName: "", email: "", phone: "", accommodation: false, consent: false, address: "" });
   const [bad, setBad] = useState<string[]>([]);
   const [msg, setMsg] = useState("");
   const [pending, start] = useTransition();
@@ -41,6 +41,16 @@ export function BriefingForm({ d, slug, locale }: { d: Dict; slug: string; local
           <input id="ph" type="tel" dir="ltr" className="input" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} autoComplete="tel" />
         </div>
       </div>
+      {gendered && (
+        <div>
+          <span className="label">{d.cAddress}</span>
+          <div className="flex flex-wrap gap-2" role="radiogroup">
+            {([["m", d.cAddrM], ["f", d.cAddrF], ["", d.cAddrN]] as const).map(([v, l]) => (
+              <button type="button" key={v || "n"} role="radio" aria-checked={f.address === v} onClick={() => setF({ ...f, address: v })} className={`chip ${f.address === v ? "chip-on" : ""}`}>{l}</button>
+            ))}
+          </div>
+        </div>
+      )}
       <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-ink/10 bg-white p-3 text-sm">
         <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand" checked={f.accommodation} onChange={(e) => setF({ ...f, accommodation: e.target.checked })} />
         <span>{d.cAccommodation}</span>

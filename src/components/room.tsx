@@ -13,6 +13,7 @@ export function Room({ d, slug }: { d: Dict; slug: string }) {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [saved, setSaved] = useState(false);
+  const [confirmShort, setConfirmShort] = useState(false);
   const keys = useRef(0);
   const qid = useRef("");
   const deadline = useRef(0);
@@ -30,6 +31,7 @@ export function Room({ d, slug }: { d: Dict; slug: string }) {
     if (v.state === "question") {
       if (v.question.id !== qid.current) {
         qid.current = v.question.id;
+        setConfirmShort(false);
         keys.current = v.keystrokes;
         textRef.current = v.draft;
         setText(v.draft);
@@ -160,7 +162,8 @@ export function Room({ d, slug }: { d: Dict; slug: string }) {
       {q.intro && <p className="rounded-xl bg-brand/[0.06] p-3 text-sm text-ink/75">{q.intro}</p>}
 
       <div className="card">
-        <h1 className="text-lg font-extrabold">{q.question.title}</h1>
+        <span className={`badge ${q.question.kind === "experience" ? "bg-mint/10 text-mint" : "bg-brand/10 text-brand"}`}>{q.question.kind === "experience" ? d.cKindExperience : d.cKindScenario}</span>
+        <h1 className="mt-2 text-lg font-extrabold">{q.question.title}</h1>
         <p className="mt-3 whitespace-pre-wrap leading-relaxed text-ink/80">{q.question.scenario}</p>
         <p className="mt-4 font-bold">{q.question.prompt}</p>
       </div>
@@ -186,13 +189,31 @@ export function Room({ d, slug }: { d: Dict; slug: string }) {
           placeholder={d.cAnswerPh}
           aria-label={q.question.prompt}
         />
-        <div className="mt-1 h-4 text-xs text-ink/45">{saved ? `✓ ${d.cAutosaved}` : ""}</div>
+        <div className="mt-1 flex justify-between gap-2 text-xs text-ink/45">
+          <span>{d.cDetailTip}</span>
+          <span className="shrink-0">{saved ? `✓ ${d.cAutosaved}` : ""}</span>
+        </div>
       </div>
 
-      <button type="button" className="btn-primary w-full py-3.5 text-base" disabled={busy} onClick={next}>
-        {busy && <Loader2 className="h-5 w-5 animate-spin" />}
-        {last ? d.cFinish : d.cNext}
-      </button>
+      {confirmShort ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <p>{d.cShortWarn.replace("{t}", `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`)}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className="btn-primary" onClick={() => { setConfirmShort(false); document.querySelector("textarea")?.focus(); }}>{d.back}</button>
+            <button type="button" className="btn-outline" disabled={busy} onClick={next}>{last ? d.cFinish : d.cNext}</button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="btn-primary w-full py-3.5 text-base"
+          disabled={busy}
+          onClick={() => (textRef.current.trim().length < 250 && left > 45 ? setConfirmShort(true) : next())}
+        >
+          {busy && <Loader2 className="h-5 w-5 animate-spin" />}
+          {last ? d.cFinish : d.cNext}
+        </button>
+      )}
 
       {toast && (
         <div role="alert" className="fixed inset-x-4 bottom-4 z-30 mx-auto flex max-w-md items-center gap-2 rounded-xl bg-ink px-4 py-3 text-sm text-white shadow-lg">

@@ -40,12 +40,13 @@ test("credits: cost cap defers evaluations for employers who never paid", () => 
   assert.equal(evalDecision({ ...broke, freeCredits: 1 }), "evaluate");
 });
 
-test("timing: limits clamped to 2-3 minutes and total ≤ 15 minutes", () => {
-  const l = normalizeLimits([30, 999, 180, 180, 180, 180, 180]);
+test("timing: limits clamped to 2.5-5 minutes and total ≤ 30 minutes", () => {
+  const l = normalizeLimits([30, 999, 300, 300, 300, 300, 300, 300]);
   assert.ok(l.every((s) => s >= MIN_SEC && s <= MAX_SEC));
-  assert.ok(l.reduce((a, b) => a + b, 0) <= TOTAL_SEC + 5 * 7, `total ${l.reduce((a, b) => a + b, 0)}`);
-  assert.deepEqual(normalizeLimits([150, 150, 150, 150, 150]), [150, 150, 150, 150, 150]);
+  assert.ok(l.reduce((a, b) => a + b, 0) <= TOTAL_SEC + 5 * 8, `total ${l.reduce((a, b) => a + b, 0)}`);
+  assert.deepEqual(normalizeLimits([240, 240, 180, 180, 180]), [240, 240, 180, 180, 180]);
   assert.equal(canSave(0, 120, 120_000 + (GRACE_SEC - 1) * 1000), true);
+  assert.equal(normalizeLimits([10])[0], MIN_SEC);
   assert.equal(canSave(0, 120, 120_000 + (GRACE_SEC + 1) * 1000), false);
 });
 

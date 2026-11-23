@@ -112,6 +112,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="font-bold">{i + 1}. {q.title}</h3>
                   <span className="flex items-center gap-2 text-xs text-ink/50">
+                    <span className={`badge ${q.kind === "experience" ? "bg-mint/10 text-mint" : "bg-ink/5 text-ink/60"}`}>{q.kind === "experience" ? t("cKindExperience") : t("cKindScenario")}</span>
                     <span className="badge bg-brand/10 text-brand">{q.competency}</span>
                     <Clock className="h-3.5 w-3.5" />{t("minutes", { n: Math.round((q.timeLimitSec / 60) * 10) / 10 })}
                   </span>

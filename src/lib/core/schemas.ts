@@ -7,6 +7,7 @@ export const QuestionSchema = z.object({
   title: z.string().min(2).max(300),
   scenario: z.string().min(40).max(4000),
   prompt: z.string().min(10).max(1000),
+  kind: z.preprocess((v) => (String(v).toLowerCase() === "experience" ? "experience" : "scenario"), z.enum(["scenario", "experience"])),
   competency: z.string().min(2).max(160),
   timeLimitSec: z.coerce.number().transform((n) => Math.round(n)),
   criteria: z.array(z.object({ name: z.string().min(1).max(200), lookFor: z.string().min(2).max(1000) })).min(1).transform((a) => a.slice(0, 5)),
@@ -46,7 +47,7 @@ const obj = (properties: Record<string, unknown>, required = Object.keys(propert
 const arr = (items: unknown) => ({ type: "array", items });
 
 export const QUESTION_JSON = obj({
-  id: str, title: str, scenario: str, prompt: str, competency: str, timeLimitSec: { type: "integer" },
+  id: str, kind: { type: "string", enum: ["scenario", "experience"] }, title: str, scenario: str, prompt: str, competency: str, timeLimitSec: { type: "integer" },
   criteria: arr(obj({ name: str, lookFor: str })),
 });
 export const ASSESSMENT_JSON = obj({ intro: str, questions: arr(QUESTION_JSON) });

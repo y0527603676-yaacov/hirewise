@@ -140,7 +140,7 @@ export async function checkoutAction(raw: { pack: string; fullName?: string; pho
 }
 
 // ---------- candidate ----------
-export async function startAssessmentAction(slug: string, raw: { fullName: string; email: string; phone: string; locale: string; accommodation: boolean; consent: boolean }): Promise<StartResult> {
+export async function startAssessmentAction(slug: string, raw: { fullName: string; email: string; phone: string; locale: string; accommodation: boolean; consent: boolean; address?: string }): Promise<StartResult> {
   const r = await startAssessment(slug, raw);
   if (r.ok && isLocale(raw.locale)) (await cookies()).set(LANG_COOKIE, raw.locale, { path: "/", maxAge: 365 * 86400, sameSite: "lax" });
   return r;

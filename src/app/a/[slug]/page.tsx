@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { Clock, EyeOff, PauseCircle, Timer, Undo2, Bot, Lock } from "lucide-react";
+import { Clock, EyeOff, PauseCircle, Timer, Undo2, Bot, Lock, PenLine } from "lucide-react";
 import { jobBySlug } from "@/lib/candidate";
 import { visitorLocale } from "@/lib/locale";
 import { retentionMonths } from "@/lib/constants";
@@ -48,12 +48,15 @@ export default async function Briefing({ params, searchParams }: { params: Promi
                 </li>
               ))}
             </ul>
-            <div className="mt-5 space-y-2 rounded-xl bg-mist p-4 text-sm leading-relaxed text-ink/75">
+            <div className="mt-5 flex gap-3 rounded-xl border-2 border-brand/25 bg-brand/[0.05] p-4 text-sm font-medium leading-relaxed text-ink">
+              <PenLine className="mt-0.5 h-5 w-5 shrink-0 text-brand" />{t("cRuleDetail")}
+            </div>
+            <div className="mt-4 space-y-2 rounded-xl bg-mist p-4 text-sm leading-relaxed text-ink/75">
               <p className="flex gap-2"><Bot className="mt-0.5 h-4 w-4 shrink-0" />{t("cAiNotice")}</p>
               <p className="flex gap-2"><Lock className="mt-0.5 h-4 w-4 shrink-0" />{t("cData", { months: retentionMonths(), email: owner.contactEmail || "" })}</p>
             </div>
             <p className="mt-5 text-sm text-ink/60">{t("cLangHint")}</p>
-            <div className="mt-4"><BriefingForm d={DICTS[locale]} slug={slug} locale={locale} /></div>
+            <div className="mt-4"><BriefingForm d={DICTS[locale]} slug={slug} locale={locale} gendered={locale === "he" || locale === "ar"} /></div>
           </>
         )}
       </div>

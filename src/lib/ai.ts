@@ -5,7 +5,7 @@
 import type { ZodType, ZodTypeDef } from "zod";
 import { ASSESSMENT_JSON, AssessmentSchema, COMPLIANCE_JSON, ComplianceSchema, REPORT_JSON, ReportSchema, type AssessmentContent, type ComplianceResult, type ReportContent } from "./core/schemas";
 import { complianceRules, LEGAL_BASIS, type Hit, type Jurisdiction } from "./core/compliance";
-import { MAX_Q, MAX_SEC, MIN_Q, MIN_SEC, normalizeLimits, TOTAL_SEC } from "./core/timing";
+import { normalizeLimits, TOTAL_SEC } from "./core/timing";
 import { LOCALE_EN, type Locale } from "@/i18n";
 
 export const aiEnabled = () => Boolean(process.env.ANTHROPIC_API_KEY);
@@ -133,26 +133,42 @@ Behavioural red lines: ${j.behavioralRedLines}
 </manager_questionnaire>`;
 
 /** Writes the role's situational-judgement test in the employer's language */
+/** Languages where the candidate is addressed with gendered verb and adjective forms */
+export const GENDERED: Locale[] = ["he", "ar"];
+export type Address = "m" | "f";
+const ADDRESS_EN: Record<Address, string> = { m: "masculine singular", f: "feminine singular" };
+
 export async function generateAssessment(job: JobInput, locale: Locale): Promise<AssessmentContent> {
   const out = await callTool({
     tool: "submit_assessment",
     schema: ASSESSMENT_JSON,
     zod: AssessmentSchema,
-    maxTokens: 9000,
-    system: `You are an expert industrial-organisational psychologist who designs situational judgement tests (SJTs) for hiring.
+    maxTokens: 12000,
+    system: `You are an expert industrial-organisational psychologist who designs structured hiring assessments: situational judgement dilemmas plus structured experience and knowledge questions.
 ${complianceRules(job.jurisdiction)}
-Write everything in ${LOCALE_EN[locale]}.`,
+Write everything in ${LOCALE_EN[locale]}.${GENDERED.includes(locale) ? " Address the candidate in gender-neutral plural forms (the version for candidates who state no preference)." : ""}`,
     user: `${jobBlock(job)}
 
-Design an assessment of ${MIN_Q}-${MAX_Q} open-ended workplace dilemmas for this exact role and team.
-Rules:
-- Each dilemma is a realistic, specific situation this person would face in the first months (concrete people, numbers, deadlines), written so a candidate from any country understands it. No trick questions, no trivia, no knowledge quiz.
-- Together they must test the critical behaviours, the non-negotiables and the red lines the manager described, plus the pace and pressure of the job. Include at least one real trade-off where two good values conflict, and one situation about owning a mistake or bad news.
-- Never reveal the "right" answer in the wording. Do not ask about the candidate's personal life or any protected characteristic.
-- "scenario": 3-6 sentences. "prompt": one direct question such as "What exactly do you do in the next hour, and why?".
-- "timeLimitSec": ${MIN_SEC}-${MAX_SEC} per question; the total must not exceed ${TOTAL_SEC} seconds.
-- "criteria": 2-4 observable things a strong answer shows ("lookFor"), so different reviewers would score the same way.
-- "id": q1, q2, ...; "intro": one friendly sentence to the candidate about what this assessment is.`,
+Design an assessment of 6-8 open-ended questions for this exact role and team, in two kinds:
+
+A) 4-5 questions with "kind": "scenario" — workplace dilemmas.
+- Each is a realistic, specific situation this person would face in the first months (concrete people, numbers, deadlines), written so a candidate from any country understands it. No trick questions.
+- Together they test the critical behaviours, the non-negotiables and the red lines the manager described, plus the pace and pressure of the job. Include at least one real trade-off where two good values conflict, and one situation about owning a mistake or bad news.
+- "scenario": 3-6 sentences describing the situation. "prompt": a direct question that invites a full answer, e.g. "Describe in detail what you do, step by step, who you involve, and why."
+- "timeLimitSec": 210-300.
+
+B) 2-3 questions with "kind": "experience" — professional experience, knowledge and working style.
+- Structured, job-related questions about the candidate's real background: hands-on experience with the core responsibilities and required skills, how they would apply their professional knowledge to this role, and how they prefer to work (planning, communication, receiving feedback) as it relates to the team described.
+- Ask for concrete examples ("Tell us about a time you…", "Walk us through how you…"). Never ask about age, family, health, origin, religion or any protected characteristic, and never ask for years of age or graduation dates.
+- "scenario": 1-3 sentences of context explaining why this matters in the role. "prompt": the question itself, asking for specifics.
+- "timeLimitSec": 150-240.
+
+For every question:
+- Never reveal the "right" answer in the wording.
+- "criteria": 2-4 observable things a strong answer shows ("lookFor"), so different reviewers would score the same way (for experience questions: specificity, depth, relevance, results).
+- The total of all timeLimitSec must not exceed ${TOTAL_SEC} seconds.
+- Order: start with one experience question, then the scenarios, and end with the remaining experience question(s).
+- "id": q1, q2, ...; "intro": two friendly sentences to the candidate: what this assessment is, and that detailed answers are their chance to show how they think and work.`,
   });
   return fixLimits(out);
 }
@@ -162,22 +178,27 @@ function fixLimits(a: AssessmentContent): AssessmentContent {
   return { ...a, questions: a.questions.map((q, i) => ({ ...q, id: `q${i + 1}`, timeLimitSec: limits[i] })) };
 }
 
-/** Translates an assessment for a candidate, keeping each dilemma identical so every candidate takes the same test */
-export async function translateAssessment(a: AssessmentContent, from: Locale, to: Locale): Promise<AssessmentContent> {
-  if (from === to) return a;
+/**
+ * Translates an assessment for a candidate, keeping each question identical so every candidate takes the same test.
+ * In gendered languages it can also address the candidate in the masculine or feminine form they chose.
+ */
+export async function translateAssessment(a: AssessmentContent, from: Locale, to: Locale, address?: Address): Promise<AssessmentContent> {
+  const gendered = Boolean(address && GENDERED.includes(to));
+  if (from === to && !gendered) return a;
+  const task = from === to ? `Rewrite this ${LOCALE_EN[to]} assessment` : `Translate this assessment into natural, clear ${LOCALE_EN[to]}`;
   const out = await callTool({
     tool: "submit_assessment",
     schema: ASSESSMENT_JSON,
     zod: AssessmentSchema,
-    maxTokens: 9000,
-    system: `You are a professional translator of hiring assessments from ${LOCALE_EN[from]} into ${LOCALE_EN[to]}.`,
-    user: `Translate this assessment into natural, clear ${LOCALE_EN[to]}.
-Keep the same number of questions, the same ids, the same timeLimitSec values and exactly the same situations, facts, numbers and difficulty, so that candidates in every language take the same test.
+    maxTokens: 12000,
+    system: `You are a professional translator and editor of hiring assessments${from === to ? ` in ${LOCALE_EN[to]}` : ` from ${LOCALE_EN[from]} into ${LOCALE_EN[to]}`}.`,
+    user: `${task}${gendered ? `, addressing the candidate in ${ADDRESS_EN[address!]} forms throughout (verbs, pronouns, adjectives)` : ""}.
+Keep the same number of questions, the same ids, kinds and timeLimitSec values, and exactly the same situations, facts, numbers and difficulty, so that every candidate takes the same test.
 You may adapt only surface details that would confuse a reader (for example a person's name), never the substance.
 <assessment>${JSON.stringify(a)}</assessment>`,
   });
-  // Safety: timing and ids always come from the original
-  return { ...out, questions: a.questions.map((q, i) => ({ ...out.questions[i], id: q.id, timeLimitSec: q.timeLimitSec, competency: out.questions[i]?.competency || q.competency })) };
+  // Safety: ids, kinds and timing always come from the original
+  return { ...out, questions: a.questions.map((q, i) => ({ ...out.questions[i], id: q.id, kind: q.kind, timeLimitSec: q.timeLimitSec, competency: out.questions[i]?.competency || q.competency })) };
 }
 
 /** Judges keyword hits in context. Returns only real problems. */
@@ -212,7 +233,7 @@ export async function evaluate(e: EvalInput): Promise<ReportContent> {
   const qa = e.questions
     .map((q) => {
       const a = e.answers.find((x) => x.id === q.id);
-      return `<question id="${q.id}" competency="${q.competency}">
+      return `<question id="${q.id}" kind="${q.kind}" competency="${q.competency}">
 <scenario>${q.scenario}</scenario>
 <prompt>${q.prompt}</prompt>
 <criteria>${q.criteria.map((c) => `- ${c.name}: ${c.lookFor}`).join("\n")}</criteria>
@@ -240,8 +261,9 @@ ${qa}
 
 Write the report:
 - Scores 0-100, calibrated: 50 is an average real-world candidate, 80+ is clearly strong, below 35 is a clear concern. An empty or off-topic answer scores very low on that question.
-  competenceScore = quality of judgement and job-relevant reasoning; cultureFitScore = fit with the pace, pressure, management style and team dynamics described (working-style fit only, never demographic "fit"); reliabilityScore = ownership, honesty, follow-through and consistency across answers; overallScore = your holistic match for this role.
-- executiveSummary: 3-5 sentences a busy manager can act on.
+  competenceScore = professional ability: quality of judgement in the scenarios plus the depth, specificity and relevance of the experience and knowledge shown in the "experience" questions (vague claims without concrete examples count for less; never penalise a lack of formal credentials unless the role requires them); cultureFitScore = fit with the pace, pressure, management style and team dynamics described (working-style fit only, never demographic "fit"); reliabilityScore = ownership, honesty, follow-through and consistency across answers; overallScore = your holistic match for this role.
+- executiveSummary: 3-5 sentences a busy manager can act on, covering both judgement in the scenarios and relevant experience.
+- Short, thin answers give little evidence: score them accordingly and say so, but never guess at what the candidate "would have" written.
 - strengths and redFlags: each backed by "evidence" quoting or closely paraphrasing the candidate's own words (translated into the report language). Do not invent evidence. If there are no real red flags, return an empty list.
 - recommendedInterviewQuestions: 3-5 follow-ups that probe this candidate's specific gaps or claims.
 - perQuestion: a score and one-sentence note for every question id.

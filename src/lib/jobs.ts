@@ -4,7 +4,7 @@ import { getDb, newId } from "./db";
 import { assessments, candidateSubmissions, jobProfiles, managerQuestionnaires, type Assessment, type JobProfile, type Questionnaire, type User } from "./schema";
 import { AssessmentSchema, type AssessmentContent } from "./core/schemas";
 import { isJurisdiction, scan, type Jurisdiction } from "./core/compliance";
-import { aiEnabled, generateAssessment, judgeCompliance, translateAssessment, type JobInput } from "./ai";
+import { aiEnabled, GENDERED, generateAssessment, judgeCompliance, translateAssessment, type Address, type JobInput } from "./ai";
 import { isLocale, type Locale } from "@/i18n";
 
 export const EMPLOYMENT_TYPES = ["full", "part", "contract", "intern"] as const;
@@ -116,17 +116,24 @@ export async function baseAssessment(jobId: string): Promise<Assessment | null> 
   return a ?? null;
 }
 
-/** The assessment in the candidate's language: the base one, or a cached translation of it */
-export async function assessmentFor(job: JobProfile, locale: Locale): Promise<Assessment | null> {
+/**
+ * The assessment in the candidate's language: the base one, or a cached translation of it.
+ * In gendered languages (Hebrew, Arabic) a candidate may choose masculine or feminine wording: cached as "he-m" / "he-f".
+ * The choice only changes grammar; it is never passed to the evaluation.
+ */
+export async function assessmentFor(job: JobProfile, locale: Locale, address?: Address | null): Promise<Assessment | null> {
+  const gendered = Boolean(address && GENDERED.includes(locale));
+  const key = gendered ? `${locale}-${address}` : locale;
   const db = await getDb();
-  const [have] = await db.select().from(assessments).where(and(eq(assessments.jobProfileId, job.id), eq(assessments.locale, locale))).limit(1);
+  const [have] = await db.select().from(assessments).where(and(eq(assessments.jobProfileId, job.id), eq(assessments.locale, key))).limit(1);
   if (have) return have;
   const base = await baseAssessment(job.id);
   if (!base) return null;
-  const translated = await translateAssessment(parseAssessment(base), base.locale as Locale, locale);
-  const row = { id: newId(), jobProfileId: job.id, locale, isBase: false, questions: JSON.stringify(translated), createdAt: new Date() };
+  if (!gendered && base.locale === locale) return base;
+  const translated = await translateAssessment(parseAssessment(base), base.locale as Locale, locale, gendered ? address! : undefined);
+  const row = { id: newId(), jobProfileId: job.id, locale: key, isBase: false, questions: JSON.stringify(translated), createdAt: new Date() };
   await db.insert(assessments).values(row).onConflictDoNothing();
-  const [saved] = await db.select().from(assessments).where(and(eq(assessments.jobProfileId, job.id), eq(assessments.locale, locale))).limit(1);
+  const [saved] = await db.select().from(assessments).where(and(eq(assessments.jobProfileId, job.id), eq(assessments.locale, key))).limit(1);
   return saved ?? null;
 }
 
