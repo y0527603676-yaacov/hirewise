@@ -3,6 +3,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Loader2, Sparkles } from "lucide-react";
 import { createJobAction } from "@/app/actions";
+import { FieldAssist } from "./field-assist";
 import type { Dict } from "@/i18n/en";
 
 type F = Record<string, string>;
@@ -20,7 +21,7 @@ const HINT: Partial<Record<string, keyof Dict>> = {
 
 type Issue = { field: string; quote: string; category: string; explanation: string; suggestion: string };
 
-export function JobWizard({ d, defaultJurisdiction, basis }: { d: Dict; defaultJurisdiction: string; basis: Record<string, string> }) {
+export function JobWizard({ d, defaultJurisdiction, basis, locale }: { d: Dict; defaultJurisdiction: string; basis: Record<string, string>; locale: string }) {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [f, setF] = useState<F>({ employmentType: "full", locationType: "onsite", jurisdiction: defaultJurisdiction, paceOfWork: "dynamic", pressureLevel: "medium", autonomyVsSupervision: "balanced" });
@@ -45,7 +46,7 @@ export function JobWizard({ d, defaultJurisdiction, basis }: { d: Dict; defaultJ
     const bad = missing.includes(k);
     const flagged = issues.filter((i) => i.field === k);
     return (
-      <div>
+      <div key={k}>
         <label className="label" htmlFor={k}>
           {d[LABEL[k]]} {!REQUIRED.includes(k) && <span className="font-normal text-ink/40">({d.optional})</span>}
         </label>
@@ -55,6 +56,7 @@ export function JobWizard({ d, defaultJurisdiction, basis }: { d: Dict; defaultJ
           <input id={k} className={`input ${bad || flagged.length ? "border-red-400" : ""}`} value={f[k] || ""} onChange={(e) => set(k, e.target.value)} />
         )}
         {HINT[k] && <p className="hint">{d[HINT[k]!]}</p>}
+        <FieldAssist field={k} value={f[k] || ""} onChange={(v) => set(k, v)} d={d} locale={locale} jurisdiction={f.jurisdiction} context={f} />
         {bad && <p className="err">{d.fieldRequired}</p>}
         {flagged.map((i, n) => (
           <div key={n} className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2.5 text-sm text-red-800">
@@ -114,6 +116,7 @@ export function JobWizard({ d, defaultJurisdiction, basis }: { d: Dict; defaultJ
       )}
 
       <div className="card mt-5 space-y-5 p-6">
+        {step < 2 && <p className="rounded-xl bg-mint/[0.07] p-3 text-sm text-ink/75">✨ {d.asHint}</p>}
         {step === 0 && (
           <>
             {text("title")}

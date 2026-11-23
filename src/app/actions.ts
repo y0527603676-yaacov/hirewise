@@ -189,3 +189,51 @@ export async function currentLocale(): Promise<Locale> {
   const u = await currentUser();
   return (u && isLocale(u.locale) ? u.locale : await visitorLocale()) as Locale;
 }
+
+// ---------- wizard assistant ----------
+export type SuggestResult = { ok: true; text: string } | { ok: false; code: "limit" | "ai_off" | "ai_failed" | "bad_file" };
+
+/** Phrases one wizard field from the employer's speech or notes (optionally a document). Up to 80 a day per employer. */
+export async function suggestFieldAction(input: {
+  field: string; raw: string; context: Record<string, string>; previous: string[]; jurisdiction: string;
+  document?: { mediaType: string; data: string; name: string };
+}): Promise<SuggestResult> {
+  const user = await requireUser();
+  const { aiEnabled, suggestField } = await import("@/lib/ai");
+  if (!aiEnabled()) return { ok: false, code: "ai_off" };
+  const { TEXT_FIELDS } = await import("@/lib/jobs");
+  if (!(TEXT_FIELDS as readonly string[]).includes(input.field)) return { ok: false, code: "ai_failed" };
+  const { getSetting } = await import("@/lib/db");
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `assist.${user.id}.${day}`;
+  const used = Number(await getSetting(key)) || 0;
+  if (used >= 80) return { ok: false, code: "limit" };
+  await putSetting(key, String(used + 1));
+
+  let document: { kind: "pdf" | "image" | "text"; mediaType: string; data: string; name: string } | undefined;
+  if (input.document) {
+    const mt = String(input.document.mediaType || "");
+    const data = String(input.document.data || "");
+    if (data.length > 7_000_000) return { ok: false, code: "bad_file" };
+    if (mt === "application/pdf") document = { kind: "pdf", mediaType: mt, data, name: input.document.name };
+    else if (/^image\/(jpeg|png|webp|gif)$/.test(mt)) document = { kind: "image", mediaType: mt, data, name: input.document.name };
+    else if (mt.startsWith("text/")) document = { kind: "text", mediaType: mt, data: data.slice(0, 40000), name: input.document.name };
+    else return { ok: false, code: "bad_file" };
+  }
+  const context: Record<string, string> = {};
+  for (const [k, v] of Object.entries(input.context || {})) if ((TEXT_FIELDS as readonly string[]).includes(k) && k !== input.field) context[k] = String(v).slice(0, 1500);
+  try {
+    const text = await suggestField({
+      field: input.field,
+      raw: String(input.raw || "").slice(0, 4000),
+      context,
+      previous: (input.previous || []).slice(-3).map((x) => String(x).slice(0, 1500)),
+      jurisdiction: (isJurisdiction(input.jurisdiction) ? input.jurisdiction : user.defaultJurisdiction) as never,
+      locale: (isLocale(user.locale) ? user.locale : "en") as Locale,
+      document,
+    });
+    return { ok: true, text };
+  } catch {
+    return { ok: false, code: "ai_failed" };
+  }
+}

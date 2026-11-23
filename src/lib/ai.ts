@@ -2,7 +2,7 @@
  * AI calls (Anthropic Messages API, structured output through a forced tool call, validated with zod).
  * Candidate answers are always passed as data inside tags, never as instructions.
  */
-import type { ZodType, ZodTypeDef } from "zod";
+import { z, type ZodType, type ZodTypeDef } from "zod";
 import { ASSESSMENT_JSON, AssessmentSchema, COMPLIANCE_JSON, ComplianceSchema, REPORT_JSON, ReportSchema, type AssessmentContent, type ComplianceResult, type ReportContent } from "./core/schemas";
 import { complianceRules, LEGAL_BASIS, type Hit, type Jurisdiction } from "./core/compliance";
 import { normalizeLimits, TOTAL_SEC } from "./core/timing";
@@ -32,7 +32,7 @@ function parseLooseJson(text: string): unknown {
   }
 }
 
-async function callTool<T>(p: { system: string; user: string; tool: string; schema: object; zod: ZodType<T, ZodTypeDef, unknown>; maxTokens?: number }): Promise<T> {
+async function callTool<T>(p: { system: string; user: string; tool: string; schema: object; zod: ZodType<T, ZodTypeDef, unknown>; maxTokens?: number; attachments?: unknown[] }): Promise<T> {
   if (!aiEnabled()) throw new AiError("ai_not_configured");
   const url = process.env.AI_API_URL || "https://api.anthropic.com/v1/messages";
   const state = (g.__hwAi ||= { thinking: { type: "between_tools" }, mode: "json" });
@@ -44,7 +44,10 @@ async function callTool<T>(p: { system: string; user: string; tool: string; sche
         model: process.env.AI_MODEL || "claude-sonnet-5-5",
         max_tokens: p.maxTokens ?? 8000,
         system: p.system,
-        messages: [{ role: "user", content: state.mode === "json" ? p.user : `${p.user}\n\nReturn the result by calling the tool "${p.tool}" once.` }],
+        messages: [{ role: "user", content: (() => {
+          const text = state.mode === "json" ? p.user : `${p.user}\n\nReturn the result by calling the tool "${p.tool}" once.`;
+          return p.attachments?.length ? [...p.attachments, { type: "text", text }] : text;
+        })() }],
       };
       if (state.mode === "json") body.output_config = { format: { type: "json_schema", schema: p.schema } };
       else {
@@ -272,4 +275,54 @@ Write the report:
   });
   const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
   return { ...out, overallScore: clamp(out.overallScore), competenceScore: clamp(out.competenceScore), cultureFitScore: clamp(out.cultureFitScore), reliabilityScore: clamp(out.reliabilityScore) };
+}
+
+// ---------- Wizard assistant: turns the employer's spoken or rough notes into a clear field text ----------
+
+const FIELD_EN: Record<string, string> = {
+  title: "the job title (a short, standard title, a few words)",
+  department: "the department or team name (one to three words)",
+  responsibilities: "the main responsibilities: what the person does every day and what success looks like after three months (a short list)",
+  requiredSkills: "the skills and experience truly required for the job (a short list)",
+  teamDynamics: "the team dynamics: team size, how decisions are made, how disagreements are handled",
+  criticalTraits: "the critical working behaviours the manager expects (a short list of observable behaviours)",
+  nonNegotiables: "the job-related non-negotiables (a short list of musts tied to the work)",
+  behavioralRedLines: "the behavioural red lines: work behaviours that would end the working relationship",
+};
+
+export type SuggestInput = {
+  field: string;
+  raw: string;
+  context: Record<string, string>;
+  previous: string[];
+  jurisdiction: Jurisdiction;
+  locale: Locale;
+  document?: { kind: "pdf" | "image" | "text"; mediaType: string; data: string; name: string };
+};
+
+const SuggestSchema = z.object({ text: z.string().min(1).max(3000) });
+const SUGGEST_JSON = { type: "object", properties: { text: { type: "string" } }, required: ["text"], additionalProperties: false };
+
+export async function suggestField(s: SuggestInput): Promise<string> {
+  const attachments: unknown[] = [];
+  if (s.document?.kind === "pdf") attachments.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: s.document.data } });
+  if (s.document?.kind === "image") attachments.push({ type: "image", source: { type: "base64", media_type: s.document.mediaType, data: s.document.data } });
+  const docText = s.document?.kind === "text" ? `\n<document name="${s.document.name.replace(/"/g, "")}">${s.document.data.slice(0, 20000)}</document>` : "";
+  const out = await callTool({
+    tool: "submit_wording",
+    schema: SUGGEST_JSON,
+    zod: SuggestSchema,
+    maxTokens: 1500,
+    attachments,
+    system: `You help an employer, who may not be used to writing, describe a role for a hiring assessment. Write in ${LOCALE_EN[s.locale]}, plainly and concretely, the way a good manager would phrase it.
+${complianceRules(s.jurisdiction)}
+Never add requirements about age, sex, family status, religion, origin, health or any protected characteristic, even if the employer mentioned them; leave such points out.`,
+    user: `Write the text for this field of the form: ${FIELD_EN[s.field] || s.field}.
+Base it on what the employer said or wrote (it may be a rough voice transcript with repetitions and errors)${s.document ? " and on the attached document about the business or the role" : ""}. Keep their meaning; organise, clarify and complete it sensibly, without inventing facts that contradict them.
+Keep it short and practical: ${s.field === "title" || s.field === "department" ? "a few words only" : "3-6 short lines, as a list with one item per line"}. No headings, no introduction.
+${s.previous.length ? `The employer rejected these earlier suggestions, so write a clearly different version (different focus, structure or wording):\n${s.previous.map((x, i) => `<rejected n="${i + 1}">${x}</rejected>`).join("\n")}` : ""}
+<employer_input>${s.raw || "(nothing yet)"}</employer_input>
+<other_fields_so_far>${JSON.stringify(s.context).slice(0, 4000)}</other_fields_so_far>${docText}`,
+  });
+  return out.text.trim();
 }
