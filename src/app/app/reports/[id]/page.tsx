@@ -8,6 +8,7 @@ import { parseAssessment } from "@/lib/jobs";
 import { fmtDate, safeJson, userLocale, userT } from "@/lib/view";
 import { secondsUsed, type Answers } from "@/lib/core/room";
 import { balance } from "@/lib/core/credits";
+import { choiceSummary } from "@/lib/core/choice";
 import { ReportView, type ReportData } from "@/components/report-view";
 import { PendingWatcher, PrintButton, RetryButton, UnlockButton } from "@/components/forms/report-actions";
 import { ScoreRing } from "@/components/ui";
@@ -138,7 +139,11 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
     redFlags: safeJson(r.redFlags, []),
     interview: safeJson(r.recommendedInterviewQuestions, []),
     integrity: safeJson(r.integrity, { level: "clean", flags: [] }),
-    questions: qs.map((q) => ({ id: q.id, title: q.title, prompt: q.prompt, answer: answers[q.id]?.text || "", seconds: secondsUsed(answers[q.id]), timedOut: answers[q.id]?.timedOut, score: perQ.find((p) => p.id === q.id)?.score, note: perQ.find((p) => p.id === q.id)?.note })),
+    questions: qs.map((q) => ({
+      id: q.id, title: q.title, prompt: q.prompt, answer: answers[q.id]?.text || "", seconds: secondsUsed(answers[q.id]), timedOut: answers[q.id]?.timedOut,
+      score: perQ.find((p) => p.id === q.id)?.score, note: perQ.find((p) => p.id === q.id)?.note,
+      choice: q.kind === "choice" ? choiceSummary(q.options, answers[q.id]?.choice) : undefined,
+    })),
   };
   return (
     <div className="mx-auto max-w-4xl space-y-5">

@@ -14,7 +14,7 @@ export type ReportData = {
   redFlags: { title: string; evidence: string; severity: "low" | "medium" | "high" }[];
   interview: { question: string; why: string }[];
   integrity: { level: IntegrityLevel; flags: IntegrityFlag[]; note?: string; accommodation?: boolean };
-  questions: { id: string; title: string; prompt: string; answer: string; seconds: number; score?: number; note?: string; timedOut?: boolean }[];
+  questions: { id: string; title: string; prompt: string; answer: string; seconds: number; score?: number; note?: string; timedOut?: boolean; choice?: { best?: string; worst?: string; key?: string } }[];
 };
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -118,7 +118,15 @@ export function ReportView({ t, r }: { t: T; r: ReportData }) {
                 </span>
               </div>
               <p className="mt-1 text-sm text-ink/55">{q.prompt}</p>
-              <blockquote dir="auto" className="mt-2 whitespace-pre-wrap rounded-lg bg-mist p-3 text-sm leading-relaxed">{q.answer || "—"}</blockquote>
+              {q.choice ? (
+                <dl className="mt-2 space-y-1 rounded-lg bg-mist p-3 text-sm">
+                  <div><dt className="inline font-semibold text-mint">{t("repBest")}: </dt><dd dir="auto" className="inline">{q.choice.best || t("repNoPick")}</dd></div>
+                  <div><dt className="inline font-semibold text-warn">{t("repWorst")}: </dt><dd dir="auto" className="inline">{q.choice.worst || t("repNoPick")}</dd></div>
+                  {q.choice.key && q.choice.key !== q.choice.best && <div className="text-ink/55"><dt className="inline">{t("repKey")}: </dt><dd dir="auto" className="inline">{q.choice.key}</dd></div>}
+                </dl>
+              ) : (
+                <blockquote dir="auto" className="mt-2 whitespace-pre-wrap rounded-lg bg-mist p-3 text-sm leading-relaxed">{q.answer || "—"}</blockquote>
+              )}
               {q.note && <p dir="auto" className="mt-2 text-sm text-ink/70">{q.note}</p>}
             </li>
           ))}

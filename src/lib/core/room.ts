@@ -5,7 +5,7 @@
  */
 import { effectiveLimit, GRACE_SEC, canSave } from "./timing";
 
-export type AnswerRec = { text: string; keystrokes: number; servedAt: number; savedAt?: number; submittedAt?: number; timedOut?: boolean };
+export type AnswerRec = { text: string; keystrokes: number; servedAt: number; savedAt?: number; submittedAt?: number; timedOut?: boolean; choice?: { most?: string; least?: string } };
 export type Answers = Record<string, AnswerRec>;
 export type RoomQ = { id: string; timeLimitSec: number };
 export type RoomState = { answers: Answers; index: number; done: boolean };
@@ -41,18 +41,18 @@ export function sync(qs: RoomQ[], s: RoomState, now: number, accommodation: bool
   return { answers, index, done: index >= qs.length };
 }
 
-/** Saves a draft of the current question (ignored after its deadline) */
-export function saveDraft(qs: RoomQ[], s: RoomState, qid: string, text: string, keystrokes: number, now: number, accommodation: boolean): RoomState {
+/** Saves a draft of the current question (ignored after its deadline). For multiple-choice questions, `choice` holds the picks. */
+export function saveDraft(qs: RoomQ[], s: RoomState, qid: string, text: string, keystrokes: number, now: number, accommodation: boolean, choice?: { most?: string; least?: string }): RoomState {
   const q = qs[s.index];
   if (!q || q.id !== qid) return s;
   const cur = s.answers[qid];
   if (!cur || cur.submittedAt || !canSave(cur.servedAt, effectiveLimit(q.timeLimitSec, accommodation), now)) return s;
-  return { ...s, answers: { ...s.answers, [qid]: { ...cur, text: text.slice(0, 6000), keystrokes: Math.max(cur.keystrokes, Math.min(100000, keystrokes | 0)), savedAt: now } } };
+  return { ...s, answers: { ...s.answers, [qid]: { ...cur, text: text.slice(0, 6000), keystrokes: Math.max(cur.keystrokes, Math.min(100000, keystrokes | 0)), savedAt: now, ...(choice ? { choice } : {}) } } };
 }
 
 /** Submits the current question and moves on. The next question starts now. */
-export function submit(qs: RoomQ[], s: RoomState, qid: string, text: string, keystrokes: number, now: number, accommodation: boolean): RoomState {
-  const saved = saveDraft(qs, s, qid, text, keystrokes, now, accommodation);
+export function submit(qs: RoomQ[], s: RoomState, qid: string, text: string, keystrokes: number, now: number, accommodation: boolean, choice?: { most?: string; least?: string }): RoomState {
+  const saved = saveDraft(qs, s, qid, text, keystrokes, now, accommodation, choice);
   const q = qs[saved.index];
   if (!q || q.id !== qid) return saved;
   const cur = saved.answers[qid];

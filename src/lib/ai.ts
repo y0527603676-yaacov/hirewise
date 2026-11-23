@@ -6,6 +6,7 @@ import { z, type ZodType, type ZodTypeDef } from "zod";
 import { ASSESSMENT_JSON, AssessmentSchema, COMPLIANCE_JSON, ComplianceSchema, REPORT_JSON, ReportSchema, type AssessmentContent, type ComplianceResult, type ReportContent } from "./core/schemas";
 import { complianceRules, LEGAL_BASIS, type Hit, type Jurisdiction } from "./core/compliance";
 import { normalizeLimits, TOTAL_SEC } from "./core/timing";
+import { scoreChoice } from "./core/choice";
 import { LOCALE_EN, type Locale } from "@/i18n";
 
 export const aiEnabled = () => Boolean(process.env.ANTHROPIC_API_KEY);
@@ -146,38 +147,35 @@ export async function generateAssessment(job: JobInput, locale: Locale): Promise
     tool: "submit_assessment",
     schema: ASSESSMENT_JSON,
     zod: AssessmentSchema,
-    maxTokens: 12000,
+    maxTokens: 16000,
     system: `You are an expert industrial-organisational psychologist who designs structured hiring assessments: situational judgement dilemmas plus structured experience and knowledge questions.
 ${complianceRules(job.jurisdiction)}
 Write everything in ${LOCALE_EN[locale]}.${GENDERED.includes(locale) ? " Address the candidate in gender-neutral plural forms (the version for candidates who state no preference)." : ""}`,
     user: `${jobBlock(job)}
 
-Design an assessment of 6-8 open-ended questions for this exact role and team, in two kinds:
+Design a mixed assessment for this exact role and team, in two kinds of questions:
 
-A) 4-5 questions with "kind": "scenario" — workplace dilemmas.
-- Each is a realistic, specific situation this person would face in the first months (concrete people, numbers, deadlines), written so a candidate from any country understands it. No trick questions.
-- Together they test the critical behaviours, the non-negotiables and the red lines the manager described, plus the pace and pressure of the job. Include at least one real trade-off where two good values conflict, and one situation about owning a mistake or bad news.
-- "scenario": 3-6 sentences describing the situation. "prompt": a direct question that invites a full answer, e.g. "Describe in detail what you do, step by step, who you involve, and why."
-- "timeLimitSec": 210-300.
+A) 12-15 questions with "kind": "choice" — multiple-choice situational judgement items (the candidate picks the BEST and the LEAST effective action).
+- Each is a realistic, specific situation this person would face in the first months (concrete people, numbers, deadlines), 2-4 sentences in "scenario", understandable to a candidate from any country.
+- "prompt": a short question such as "What would you do?".
+- "options": exactly 4 actions, ids "a", "b", "c", "d", each a plausible thing a real employee might do (no silly or obviously wrong options; all of similar length and tone, so the best answer is not given away by wording). Give each a distinct "effectiveness" from 1 (worst) to 4 (best), judged by what THIS manager described (pace, pressure, management style, critical behaviours, non-negotiables, red lines), and a one-sentence "why". Vary the position of the best option across items.
+- Together the items must cover all the critical behaviours, non-negotiables and red lines, plus customer/colleague/manager situations, a mistake or bad news, and at least two real trade-offs where two good values conflict.
+- "timeLimitSec": 60-90. "criteria": one item naming the behaviour it tests.
 
-B) 2-3 questions with "kind": "experience" — professional experience, knowledge and working style.
-- Structured, job-related questions about the candidate's real background: hands-on experience with the core responsibilities and required skills, how they would apply their professional knowledge to this role, and how they prefer to work (planning, communication, receiving feedback) as it relates to the team described.
-- Ask for concrete examples ("Tell us about a time you…", "Walk us through how you…"). Never ask about age, family, health, origin, religion or any protected characteristic, and never ask for years of age or graduation dates.
-- "scenario": 1-3 sentences of context explaining why this matters in the role. "prompt": the question itself, asking for specifics.
-- "timeLimitSec": 150-240.
+B) 2-3 questions with "kind": "experience" — open questions about real professional experience, knowledge and working style.
+- Hands-on experience with the core responsibilities and required skills, how they would apply their professional knowledge to this role, and how they like to work as it relates to the team described. Ask for concrete examples ("Tell us about a time you…", "Walk us through how you…").
+- "scenario": 1-2 sentences of context; "prompt": the question; "options": an empty list; "timeLimitSec": 180-240; "criteria": 2-4 observable signs of a strong answer (specificity, depth, relevance, results).
 
-For every question:
-- Never reveal the "right" answer in the wording.
-- "criteria": 2-4 observable things a strong answer shows ("lookFor"), so different reviewers would score the same way (for experience questions: specificity, depth, relevance, results).
-- The total of all timeLimitSec must not exceed ${TOTAL_SEC} seconds.
-- Order: start with one experience question, then the scenarios, and end with the remaining experience question(s).
-- "id": q1, q2, ...; "intro": two friendly sentences to the candidate: what this assessment is, and that detailed answers are their chance to show how they think and work.`,
+For every question: never ask about or hint at age, family, health, origin, religion or any protected characteristic.
+The total of all timeLimitSec must not exceed ${TOTAL_SEC} seconds.
+Order: one experience question first, then the choice items, then the remaining experience question(s).
+"id": q1, q2, ...; "intro": two friendly sentences to the candidate: what the assessment is (choosing the best and least effective action in short work situations, plus a few open questions about their experience) and that the open answers are their chance to show how they work.`,
   });
   return fixLimits(out);
 }
 
 function fixLimits(a: AssessmentContent): AssessmentContent {
-  const limits = normalizeLimits(a.questions.map((q) => q.timeLimitSec));
+  const limits = normalizeLimits(a.questions.map((q) => q.timeLimitSec), a.questions.map((q) => q.kind));
   return { ...a, questions: a.questions.map((q, i) => ({ ...q, id: `q${i + 1}`, timeLimitSec: limits[i] })) };
 }
 
@@ -193,15 +191,27 @@ export async function translateAssessment(a: AssessmentContent, from: Locale, to
     tool: "submit_assessment",
     schema: ASSESSMENT_JSON,
     zod: AssessmentSchema,
-    maxTokens: 12000,
+    maxTokens: 16000,
     system: `You are a professional translator and editor of hiring assessments${from === to ? ` in ${LOCALE_EN[to]}` : ` from ${LOCALE_EN[from]} into ${LOCALE_EN[to]}`}.`,
     user: `${task}${gendered ? `, addressing the candidate in ${ADDRESS_EN[address!]} forms throughout (verbs, pronouns, adjectives)` : ""}.
-Keep the same number of questions, the same ids, kinds and timeLimitSec values, and exactly the same situations, facts, numbers and difficulty, so that every candidate takes the same test.
+Keep the same number of questions, the same ids, kinds and timeLimitSec values, the same answer options in the same order with the same ids and effectiveness values, and exactly the same situations, facts, numbers and difficulty, so that every candidate takes the same test.
 You may adapt only surface details that would confuse a reader (for example a person's name), never the substance.
 <assessment>${JSON.stringify(a)}</assessment>`,
   });
   // Safety: ids, kinds and timing always come from the original
-  return { ...out, questions: a.questions.map((q, i) => ({ ...out.questions[i], id: q.id, kind: q.kind, timeLimitSec: q.timeLimitSec, competency: out.questions[i]?.competency || q.competency })) };
+  // Safety: ids, kinds, timing and the scoring key always come from the original; only texts are translated
+  return {
+    ...out,
+    questions: a.questions.map((q, i) => {
+      const t = out.questions[i];
+      return {
+        ...q,
+        title: t?.title || q.title, scenario: t?.scenario || q.scenario, prompt: t?.prompt || q.prompt, competency: t?.competency || q.competency,
+        criteria: t?.criteria?.length ? t.criteria : q.criteria,
+        options: q.options.map((o, k) => ({ ...o, text: t?.options?.find((x) => x.id === o.id)?.text || t?.options?.[k]?.text || o.text })),
+      };
+    }),
+  };
 }
 
 /** Judges keyword hits in context. Returns only real problems. */
@@ -225,7 +235,9 @@ Return only real problems. For each: the field, the exact quote, the category, a
 export type EvalInput = {
   job: JobInput;
   questions: AssessmentContent["questions"];
-  answers: { id: string; text: string; secondsUsed: number; timedOut: boolean }[];
+  answers: { id: string; text: string; secondsUsed: number; timedOut: boolean; choice?: { most?: string; least?: string } }[];
+  /** Deterministic average score of the multiple-choice items (0-100), or null if there are none */
+  choiceScore?: number | null;
   candidateLocale: Locale;
   reportLocale: Locale;
   integritySummary: string;
@@ -236,6 +248,16 @@ export async function evaluate(e: EvalInput): Promise<ReportContent> {
   const qa = e.questions
     .map((q) => {
       const a = e.answers.find((x) => x.id === q.id);
+      if (q.kind === "choice") {
+        const opt = (id?: string) => q.options.find((o) => o.id === id);
+        const most = opt(a?.choice?.most);
+        const least = opt(a?.choice?.least);
+        return `<question id="${q.id}" kind="choice" competency="${q.competency}">
+<scenario>${q.scenario}</scenario>
+<options>${q.options.map((o) => `\n- ${o.id} (effectiveness ${o.effectiveness}/4): ${o.text}`).join("")}</options>
+<candidate_picks best="${most ? `${most.id} (effectiveness ${most.effectiveness})` : "none"}" least_effective="${least ? `${least.id} (effectiveness ${least.effectiveness})` : "none"}" item_score="${scoreChoice(q.options, a?.choice)}" seconds_used="${a?.secondsUsed ?? 0}" timed_out="${a?.timedOut ? "yes" : "no"}"/>
+</question>`;
+      }
       return `<question id="${q.id}" kind="${q.kind}" competency="${q.competency}">
 <scenario>${q.scenario}</scenario>
 <prompt>${q.prompt}</prompt>
@@ -261,9 +283,11 @@ ${qa}
 </assessment>
 
 <integrity_signals>${e.integritySummary}</integrity_signals>
+${typeof e.choiceScore === "number" ? `<multiple_choice_score>${e.choiceScore}</multiple_choice_score> (deterministic average of the choice items against the manager-based key)` : ""}
 
 Write the report:
 - Scores 0-100, calibrated: 50 is an average real-world candidate, 80+ is clearly strong, below 35 is a clear concern. An empty or off-topic answer scores very low on that question.
+  For "choice" items the picks and their effectiveness are facts: use them as the main evidence of judgement (the multiple-choice score is calibrated, keep competence close to it unless the open answers clearly show otherwise), and quote the chosen actions as evidence where relevant. For "choice" items in perQuestion use the given item_score.
   competenceScore = professional ability: quality of judgement in the scenarios plus the depth, specificity and relevance of the experience and knowledge shown in the "experience" questions (vague claims without concrete examples count for less; never penalise a lack of formal credentials unless the role requires them); cultureFitScore = fit with the pace, pressure, management style and team dynamics described (working-style fit only, never demographic "fit"); reliabilityScore = ownership, honesty, follow-through and consistency across answers; overallScore = your holistic match for this role.
 - executiveSummary: 3-5 sentences a busy manager can act on, covering both judgement in the scenarios and relevant experience.
 - Short, thin answers give little evidence: score them accordingly and say so, but never guess at what the candidate "would have" written.

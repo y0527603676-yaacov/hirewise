@@ -151,3 +151,43 @@ test("i18n: all six languages have every key, filled", () => {
   assert.equal(fromAcceptLanguage("iw"), "he");
   assert.equal(fromAcceptLanguage("ja,zh"), "en");
 });
+
+import { scoreChoice, choiceAverage, validPick, choiceSummary } from "../src/lib/core/choice";
+import { CHOICE_MIN_SEC, CHOICE_MAX_SEC } from "../src/lib/core/timing";
+import { QuestionSchema } from "../src/lib/core/schemas";
+
+const OPTS = [{ id: "a", effectiveness: 2, text: "Act A" }, { id: "b", effectiveness: 4, text: "Act B" }, { id: "c", effectiveness: 1, text: "Act C" }, { id: "d", effectiveness: 3, text: "Act D" }];
+
+test("choice: best+worst scoring by the key", () => {
+  assert.equal(scoreChoice(OPTS, { most: "b", least: "c" }), 100);
+  assert.equal(scoreChoice(OPTS, { most: "c", least: "b" }), 0);
+  assert.equal(scoreChoice(OPTS, { most: "b" }), 50);
+  assert.equal(scoreChoice(OPTS, { most: "d", least: "a" }), 67);
+  assert.equal(scoreChoice(OPTS, { most: "b", least: "b" }), 50, "the same option can't be both");
+  assert.equal(scoreChoice(OPTS, undefined), 0);
+  assert.equal(choiceAverage([{ options: OPTS, pick: { most: "b", least: "c" } }, { options: OPTS }]), 50);
+  assert.equal(choiceAverage([]), null);
+  assert.deepEqual(validPick(OPTS, { most: "b", least: "zz" }), { most: "b", least: undefined });
+  assert.equal(validPick(OPTS, "junk"), undefined);
+  assert.equal(choiceSummary(OPTS, { most: "a", least: "c" }).key, "Act B");
+});
+
+test("choice: timing per kind and schema guards", () => {
+  const l = normalizeLimits([10, 500, 60, 300], ["choice", "choice", "experience", "experience"]);
+  assert.equal(l[0], CHOICE_MIN_SEC);
+  assert.equal(l[1], CHOICE_MAX_SEC);
+  assert.equal(l[2], MIN_SEC);
+  const many = normalizeLimits(Array(20).fill(120), Array(20).fill("choice"));
+  assert.ok(many.reduce((a, b) => a + b, 0) <= TOTAL_SEC);
+  const base = { id: "q1", title: "Title", scenario: "x".repeat(50), prompt: "What would you do?", competency: "Judgement", timeLimitSec: 75, criteria: [{ name: "n", lookFor: "look" }] };
+  assert.equal(QuestionSchema.parse({ ...base, kind: "choice", options: OPTS.map((o) => ({ ...o, why: "" })) }).kind, "choice");
+  assert.equal(QuestionSchema.parse({ ...base, kind: "choice", options: [] }).kind, "scenario", "a choice item without options falls back to open");
+  assert.equal(QuestionSchema.parse({ ...base, kind: "choice", options: [{ id: "a", text: "aa", effectiveness: 9 }, { id: "b", text: "bb", effectiveness: -2 }, { id: "c", text: "cc", effectiveness: 2 }] }).options[0].effectiveness, 4);
+});
+
+test("integrity: choice items never count as empty text or typing anomalies", () => {
+  const r = integrity({ tabSwitches: 0, pasteAttempts: 0, questions: [{ id: "q1", chars: 0, keystrokes: 0, secondsUsed: 20, limitSec: 75, timedOut: false, choice: true, picked: true }] });
+  assert.equal(r.level, "clean");
+  const r2 = integrity({ tabSwitches: 0, pasteAttempts: 0, questions: [{ id: "q1", chars: 0, keystrokes: 0, secondsUsed: 75, limitSec: 75, timedOut: true, choice: true, picked: false }] });
+  assert.ok(r2.flags.some((f) => f.code === "EMPTY"));
+});

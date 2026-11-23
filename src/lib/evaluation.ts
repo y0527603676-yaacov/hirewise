@@ -4,6 +4,7 @@ import { delSetting, getDb, getSetting, newId, putSetting, rawDb } from "./db";
 import { candidates, candidateSubmissions, evaluationReports, jobProfiles, users, type User } from "./schema";
 import { evalDecision, manualUnlockSource } from "./core/credits";
 import { secondsUsed, type Answers } from "./core/room";
+import { choiceAverage, scoreChoice } from "./core/choice";
 import { evaluate } from "./ai";
 import { getJobFull, parseAssessment, toJobInput } from "./jobs";
 import { integrityOf } from "./scoring";
@@ -68,14 +69,26 @@ export async function runEvaluation(subId: string): Promise<"done" | "skipped" |
     const answers = JSON.parse(sub.answers || "{}") as Answers;
     const integ = integrityOf(sub, qs, cand.accommodation);
     const reportLocale = (isLocale(owner.locale) ? owner.locale : "en") as Locale;
-    const content = await evaluate({
+    const choiceItems = qs.filter((q) => q.kind === "choice");
+    const choiceScore = choiceAverage(choiceItems.map((q) => ({ options: q.options, pick: answers[q.id]?.choice })));
+    const raw = await evaluate({
       job: toJobInput({ ...full.job, ...full.q }),
       questions: qs,
-      answers: qs.map((q) => ({ id: q.id, text: answers[q.id]?.text || "", secondsUsed: secondsUsed(answers[q.id]), timedOut: Boolean(answers[q.id]?.timedOut) })),
+      answers: qs.map((q) => ({ id: q.id, text: answers[q.id]?.text || "", secondsUsed: secondsUsed(answers[q.id]), timedOut: Boolean(answers[q.id]?.timedOut), choice: answers[q.id]?.choice })),
+      choiceScore,
       candidateLocale: (isLocale(cand.locale) ? cand.locale : "en") as Locale,
       reportLocale,
       integritySummary: JSON.stringify({ level: integ.level, flags: integ.flags, extendedTimeForAccessibility: cand.accommodation }),
     });
+    // The multiple-choice part is objective: per-item scores come from the key, and competence leans on it
+    const content = choiceScore === null ? raw : {
+      ...raw,
+      competenceScore: Math.round(raw.competenceScore * 0.4 + choiceScore * 0.6),
+      perQuestion: qs.map((q) => {
+        const ai = raw.perQuestion.find((p) => p.id === q.id);
+        return q.kind === "choice" ? { id: q.id, score: scoreChoice(q.options, answers[q.id]?.choice), note: ai?.note || "" } : ai || { id: q.id, score: 0, note: "" };
+      }),
+    };
 
     // Who pays: a credit reserved at unlock time (deferred reports), else a free credit, else it stays locked
     const prepaid = (await getSetting(`prepaid.${subId}`)) as "FREE" | "CREDIT" | null;

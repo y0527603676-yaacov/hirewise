@@ -13,6 +13,7 @@ import { isJurisdiction } from "./core/compliance";
 import { appUrl, PARTNER_EMAIL_DOMAIN } from "./constants";
 import { parseAssessment } from "./jobs";
 import { secondsUsed, type Answers } from "./core/room";
+import { choiceSummary } from "./core/choice";
 import { getT, isLocale, LOCALE_NAMES, type Locale } from "@/i18n";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -168,6 +169,7 @@ export async function reportView(u: User, subId: string) {
     },
     questions: qs.map((q) => ({
       id: q.id, kind: q.kind, title: q.title, prompt: q.prompt,
+      choice: q.kind === "choice" ? choiceSummary(q.options, answers[q.id]?.choice) : null,
       answer: answers[q.id]?.text || "", seconds: secondsUsed(answers[q.id]), timedOut: Boolean(answers[q.id]?.timedOut),
       score: perQ.find((p) => p.id === q.id)?.score ?? null, note: perQ.find((p) => p.id === q.id)?.note ?? "",
     })),

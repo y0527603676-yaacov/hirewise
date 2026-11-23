@@ -14,6 +14,8 @@ export function Room({ d, slug }: { d: Dict; slug: string }) {
   const [toast, setToast] = useState("");
   const [saved, setSaved] = useState(false);
   const [confirmShort, setConfirmShort] = useState(false);
+  const [pick, setPick] = useState<{ most?: string; least?: string }>({});
+  const pickRef = useRef<{ most?: string; least?: string }>({});
   const keys = useRef(0);
   const qid = useRef("");
   const deadline = useRef(0);
@@ -32,6 +34,8 @@ export function Room({ d, slug }: { d: Dict; slug: string }) {
       if (v.question.id !== qid.current) {
         qid.current = v.question.id;
         setConfirmShort(false);
+        pickRef.current = v.choice ?? {};
+        setPick(v.choice ?? {});
         keys.current = v.keystrokes;
         textRef.current = v.draft;
         setText(v.draft);
@@ -56,7 +60,7 @@ export function Room({ d, slug }: { d: Dict; slug: string }) {
     setBusy(true);
     try {
       if (saveTimer.current) clearTimeout(saveTimer.current);
-      const v = await api({ action: "next", qid: qid.current, text: textRef.current, keystrokes: keys.current });
+      const v = await api({ action: "next", qid: qid.current, text: textRef.current, keystrokes: keys.current, choice: pickRef.current });
       show(v);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch {
@@ -121,6 +125,15 @@ export function Room({ d, slug }: { d: Dict; slug: string }) {
     }, 1200);
   };
 
+  const choose = (slot: "most" | "least", id: string) => {
+    const next = { ...pickRef.current, [slot]: id };
+    if (slot === "most" && next.least === id) delete next.least;
+    if (slot === "least" && next.most === id) delete next.most;
+    pickRef.current = next;
+    setPick(next);
+    api({ action: "save", qid: qid.current, text: "", keystrokes: 0, choice: next }).then((r) => r?.ok && setSaved(true)).catch(() => {});
+  };
+
   const blockPaste = (e: React.ClipboardEvent | React.DragEvent) => {
     e.preventDefault();
     flash(d.cPasteBlocked);
@@ -162,12 +175,40 @@ export function Room({ d, slug }: { d: Dict; slug: string }) {
       {q.intro && <p className="rounded-xl bg-brand/[0.06] p-3 text-sm text-ink/75">{q.intro}</p>}
 
       <div className="card">
-        <span className={`badge ${q.question.kind === "experience" ? "bg-mint/10 text-mint" : "bg-brand/10 text-brand"}`}>{q.question.kind === "experience" ? d.cKindExperience : d.cKindScenario}</span>
+        <span className={`badge ${q.question.kind === "experience" ? "bg-mint/10 text-mint" : "bg-brand/10 text-brand"}`}>{q.question.kind === "experience" ? d.cKindExperience : q.question.kind === "choice" ? d.cKindChoice : d.cKindScenario}</span>
         <h1 className="mt-2 text-lg font-extrabold">{q.question.title}</h1>
         <p className="mt-3 whitespace-pre-wrap leading-relaxed text-ink/80">{q.question.scenario}</p>
         <p className="mt-4 font-bold">{q.question.prompt}</p>
       </div>
 
+      {q.question.kind === "choice" ? (
+        <div className="space-y-4">
+          {([["most", d.cChooseBest], ["least", d.cChooseWorst]] as const).map(([slot, label]) => (
+            <fieldset key={slot} className="card space-y-2">
+              <legend className="px-1 text-sm font-bold">{label}</legend>
+              {q.question.options.map((o) => {
+                const on = pick[slot] === o.id;
+                const other = pick[slot === "most" ? "least" : "most"] === o.id;
+                return (
+                  <button
+                    type="button"
+                    key={o.id}
+                    role="radio"
+                    aria-checked={on}
+                    disabled={other}
+                    onClick={() => choose(slot, o.id)}
+                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-start text-sm leading-relaxed transition ${on ? (slot === "most" ? "border-mint bg-mint/[0.07] ring-2 ring-mint/20" : "border-warn bg-orange-50 ring-2 ring-orange-200") : "border-ink/10 bg-white hover:border-ink/30"} ${other ? "opacity-40" : ""}`}
+                  >
+                    <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[11px] font-bold ${on ? "border-transparent bg-ink text-white" : "border-ink/25"}`}>{on ? "✓" : ""}</span>
+                    <span dir="auto">{o.text}</span>
+                  </button>
+                );
+              })}
+            </fieldset>
+          ))}
+          <div className="h-4 text-xs text-ink/45">{pick.most && pick.least ? (saved ? `✓ ${d.cAutosaved}` : "") : d.cPickBoth}</div>
+        </div>
+      ) : (
       <div>
         <textarea
           className="input min-h-[220px] text-base leading-relaxed"
@@ -194,6 +235,7 @@ export function Room({ d, slug }: { d: Dict; slug: string }) {
           <span className="shrink-0">{saved ? `✓ ${d.cAutosaved}` : ""}</span>
         </div>
       </div>
+      )}
 
       {confirmShort ? (
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
@@ -207,8 +249,8 @@ export function Room({ d, slug }: { d: Dict; slug: string }) {
         <button
           type="button"
           className="btn-primary w-full py-3.5 text-base"
-          disabled={busy}
-          onClick={() => (textRef.current.trim().length < 250 && left > 45 ? setConfirmShort(true) : next())}
+          disabled={busy || (q.question.kind === "choice" && !(pick.most && pick.least))}
+          onClick={() => (q.question.kind !== "choice" && textRef.current.trim().length < 250 && left > 45 ? setConfirmShort(true) : next())}
         >
           {busy && <Loader2 className="h-5 w-5 animate-spin" />}
           {last ? d.cFinish : d.cNext}

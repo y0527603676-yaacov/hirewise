@@ -9,6 +9,7 @@ import { assessmentFor, parseAssessment } from "./jobs";
 import { sync, saveDraft, submit, secondsUsed, type Answers, type RoomState } from "./core/room";
 import { effectiveLimit, remaining } from "./core/timing";
 import { integrityOf } from "./scoring";
+import { validPick } from "./core/choice";
 import { background } from "./cf";
 import { scheduleEvaluation } from "./evaluation";
 import { mailConfigured, mailHtml, sendMail } from "./mail";
@@ -109,7 +110,7 @@ async function persist(ctx: Ctx, s: RoomState) {
 export type RoomView =
   | { state: "none" }
   | { state: "done"; name: string; company: string }
-  | { state: "question"; index: number; total: number; question: { id: string; kind: "scenario" | "experience"; title: string; scenario: string; prompt: string }; limit: number; remaining: number; draft: string; keystrokes: number; intro: string };
+  | { state: "question"; index: number; total: number; question: { id: string; kind: "scenario" | "experience" | "choice"; title: string; scenario: string; prompt: string; options: { id: string; text: string }[] }; limit: number; remaining: number; draft: string; keystrokes: number; choice: { most?: string; least?: string } | null; intro: string };
 
 async function view(ctx: Ctx, s: RoomState): Promise<RoomView> {
   if (s.done || ctx.sub.status !== "IN_PROGRESS") {
@@ -120,7 +121,9 @@ async function view(ctx: Ctx, s: RoomState): Promise<RoomView> {
   const q = ctx.qs[s.index];
   const a = s.answers[q.id];
   const limit = effectiveLimit(q.timeLimitSec, ctx.cand.accommodation);
-  return { state: "question", index: s.index, total: ctx.qs.length, question: { id: q.id, kind: q.kind, title: q.title, scenario: q.scenario, prompt: q.prompt }, limit, remaining: Math.max(0, remaining(a.servedAt, limit)), draft: a.text, keystrokes: a.keystrokes, intro: s.index === 0 ? ctx.intro : "" };
+  return { state: "question", index: s.index, total: ctx.qs.length, // The scoring key (effectiveness) never leaves the server
+    question: { id: q.id, kind: q.kind, title: q.title, scenario: q.scenario, prompt: q.prompt, options: q.options.map((o) => ({ id: o.id, text: o.text })) },
+    limit, remaining: Math.max(0, remaining(a.servedAt, limit)), draft: a.text, keystrokes: a.keystrokes, choice: a.choice ?? null, intro: s.index === 0 ? ctx.intro : "" };
 }
 
 export async function roomState(slug: string): Promise<RoomView> {
@@ -133,23 +136,28 @@ export async function roomState(slug: string): Promise<RoomView> {
   return view(ctx, s);
 }
 
-export async function roomSave(slug: string, qid: string, text: string, keystrokes: number): Promise<{ ok: boolean }> {
+const pickFor = (ctx: Ctx, qid: string, raw: unknown) => {
+  const q = ctx.qs.find((x) => x.id === qid);
+  return q && q.kind === "choice" ? validPick(q.options, raw) : undefined;
+};
+
+export async function roomSave(slug: string, qid: string, text: string, keystrokes: number, choice?: unknown): Promise<{ ok: boolean }> {
   const ctx = await loadCtx(slug);
   if (!ctx || ctx.sub.status !== "IN_PROGRESS") return { ok: false };
   const now = Date.now();
   const s0 = sync(ctx.qs, roomOf(ctx.sub), now, ctx.cand.accommodation);
-  const s = saveDraft(ctx.qs, s0, qid, String(text || ""), Number(keystrokes) || 0, now, ctx.cand.accommodation);
+  const s = saveDraft(ctx.qs, s0, qid, String(text || ""), Number(keystrokes) || 0, now, ctx.cand.accommodation, pickFor(ctx, qid, choice));
   await persist(ctx, s);
   return { ok: s.answers[qid]?.savedAt === now };
 }
 
-export async function roomNext(slug: string, qid: string, text: string, keystrokes: number): Promise<RoomView> {
+export async function roomNext(slug: string, qid: string, text: string, keystrokes: number, choice?: unknown): Promise<RoomView> {
   const ctx = await loadCtx(slug);
   if (!ctx) return { state: "none" };
   if (ctx.sub.status !== "IN_PROGRESS") return view(ctx, roomOf(ctx.sub));
   const now = Date.now();
   const s0 = sync(ctx.qs, roomOf(ctx.sub), now, ctx.cand.accommodation);
-  const s = submit(ctx.qs, s0, qid, String(text || ""), Number(keystrokes) || 0, now, ctx.cand.accommodation);
+  const s = submit(ctx.qs, s0, qid, String(text || ""), Number(keystrokes) || 0, now, ctx.cand.accommodation, pickFor(ctx, qid, choice));
   await persist(ctx, s);
   return view(ctx, s);
 }
@@ -172,9 +180,10 @@ async function finish(ctx: Ctx, s: RoomState) {
   const [fresh] = await db.select().from(candidateSubmissions).where(eq(candidateSubmissions.id, ctx.sub.id)).limit(1);
   const integ = integrityOf(fresh, ctx.qs, ctx.cand.accommodation);
   // Abandoned attempts (fewer than 2 real answers) are kept but not evaluated
-  const answered = ctx.qs.filter((q) => (s.answers[q.id]?.text || "").trim().length >= 15).length;
-  await db.update(candidateSubmissions).set({ suspiciousActivityFlags: JSON.stringify(integ.flags), status: answered < 2 ? "EXPIRED" : "COMPLETED" }).where(eq(candidateSubmissions.id, ctx.sub.id));
-  if (answered < 2) return;
+  const answered = ctx.qs.filter((q) => (q.kind === "choice" ? Boolean(s.answers[q.id]?.choice?.most) : (s.answers[q.id]?.text || "").trim().length >= 15)).length;
+  const need = Math.min(3, Math.max(2, Math.ceil(ctx.qs.length * 0.2)));
+  await db.update(candidateSubmissions).set({ suspiciousActivityFlags: JSON.stringify(integ.flags), status: answered < need ? "EXPIRED" : "COMPLETED" }).where(eq(candidateSubmissions.id, ctx.sub.id));
+  if (answered < need) return;
   await scheduleEvaluation(ctx.sub.id);
   const [owner] = await db.select().from(users).where(eq(users.id, ctx.job.userId)).limit(1);
   const to = owner ? notifyAddress(owner) : "";
