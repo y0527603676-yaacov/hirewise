@@ -122,10 +122,16 @@ test("paddle: webhook signature", () => {
   assert.equal(verifyPaddleSignature(null, body, "sec"), false);
 });
 
-test("schemas: report scores must be 0-100; an assessment needs 5-7 questions", () => {
+test("schemas: report scores are clamped to 0-100; an assessment needs at least 5 questions", () => {
   const base = { overallScore: 70, competenceScore: 70, cultureFitScore: 70, reliabilityScore: 70, executiveSummary: "A solid candidate overall with clear reasoning.", strengths: [], redFlags: [], recommendedInterviewQuestions: [{ question: "a", why: "b" }, { question: "c", why: "d" }], perQuestion: [], integrityNote: "" };
   assert.equal(ReportSchema.safeParse(base).success, true);
-  assert.equal(ReportSchema.safeParse({ ...base, overallScore: 140 }).success, false);
+  const clamped = ReportSchema.safeParse({ ...base, overallScore: 140, competenceScore: "-3", redFlags: [{ title: "x", evidence: "y", severity: "High" }] });
+  assert.equal(clamped.success, true);
+  if (clamped.success) {
+    assert.equal(clamped.data.overallScore, 100);
+    assert.equal(clamped.data.competenceScore, 0);
+    assert.equal(clamped.data.redFlags[0].severity, "high");
+  }
   assert.equal(AssessmentSchema.safeParse({ intro: "", questions: [] }).success, false);
 });
 

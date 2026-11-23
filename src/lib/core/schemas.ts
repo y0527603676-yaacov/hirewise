@@ -4,38 +4,38 @@ import { MAX_Q, MIN_Q } from "./timing";
 /** A situational-judgement question as stored in an assessment */
 export const QuestionSchema = z.object({
   id: z.string().min(1).max(12),
-  title: z.string().min(2).max(140),
-  scenario: z.string().min(40).max(1600),
-  prompt: z.string().min(10).max(400),
-  competency: z.string().min(2).max(80),
-  timeLimitSec: z.number().int().min(60).max(400),
-  criteria: z.array(z.object({ name: z.string().min(2).max(80), lookFor: z.string().min(5).max(400) })).min(1).max(5),
+  title: z.string().min(2).max(300),
+  scenario: z.string().min(40).max(4000),
+  prompt: z.string().min(10).max(1000),
+  competency: z.string().min(2).max(160),
+  timeLimitSec: z.coerce.number().transform((n) => Math.round(n)),
+  criteria: z.array(z.object({ name: z.string().min(1).max(200), lookFor: z.string().min(2).max(1000) })).min(1).transform((a) => a.slice(0, 5)),
 });
 export type Question = z.infer<typeof QuestionSchema>;
 
 export const AssessmentSchema = z.object({
-  intro: z.string().max(600).default(""),
-  questions: z.array(QuestionSchema).min(MIN_Q).max(MAX_Q),
+  intro: z.string().max(2000).default(""),
+  questions: z.array(QuestionSchema).min(MIN_Q).transform((a) => a.slice(0, MAX_Q)),
 });
 export type AssessmentContent = z.infer<typeof AssessmentSchema>;
 
-const score = z.number().min(0).max(100);
+const score = z.coerce.number().transform((n) => Math.max(0, Math.min(100, Math.round(n))));
 export const ReportSchema = z.object({
   overallScore: score,
   competenceScore: score,
   cultureFitScore: score,
   reliabilityScore: score,
-  executiveSummary: z.string().min(20).max(1800),
-  strengths: z.array(z.object({ title: z.string().max(140), evidence: z.string().max(600) })).max(6),
-  redFlags: z.array(z.object({ title: z.string().max(140), evidence: z.string().max(600), severity: z.enum(["low", "medium", "high"]) })).max(6),
-  recommendedInterviewQuestions: z.array(z.object({ question: z.string().max(400), why: z.string().max(300) })).min(2).max(6),
-  perQuestion: z.array(z.object({ id: z.string(), score, note: z.string().max(500) })).max(MAX_Q),
-  integrityNote: z.string().max(500).default(""),
+  executiveSummary: z.string().min(20).max(5000),
+  strengths: z.array(z.object({ title: z.string().max(300), evidence: z.string().max(1500) })).transform((a) => a.slice(0, 6)),
+  redFlags: z.array(z.object({ title: z.string().max(300), evidence: z.string().max(1500), severity: z.preprocess((v) => String(v).toLowerCase(), z.enum(["low", "medium", "high"])) })).transform((a) => a.slice(0, 6)),
+  recommendedInterviewQuestions: z.array(z.object({ question: z.string().max(1000), why: z.string().max(800) })).min(1).transform((a) => a.slice(0, 6)),
+  perQuestion: z.array(z.object({ id: z.string(), score, note: z.string().max(1500) })).transform((a) => a.slice(0, MAX_Q)),
+  integrityNote: z.string().max(1500).default(""),
 });
 export type ReportContent = z.infer<typeof ReportSchema>;
 
 export const ComplianceSchema = z.object({
-  issues: z.array(z.object({ field: z.string(), quote: z.string().max(300), category: z.string(), explanation: z.string().max(500), suggestion: z.string().max(400) })).max(20),
+  issues: z.array(z.object({ field: z.string(), quote: z.string().max(1000), category: z.string(), explanation: z.string().max(1500), suggestion: z.string().max(1500) })).transform((a) => a.slice(0, 20)),
 });
 export type ComplianceResult = z.infer<typeof ComplianceSchema>;
 

@@ -13,29 +13,45 @@ export const aiEnabled = () => Boolean(process.env.ANTHROPIC_API_KEY);
 export class AiError extends Error {}
 
 /**
- * How thinking is turned off differs between model generations: older ones take {type:"disabled"}, newer ones
- * reject it and name the value they expect (e.g. "between_tools"). We learn it from the API's own error and remember it.
+ * Structured output. Claude Sonnet 5.5 rejects forced tool use (tool_choice "tool"/"any") and thinking {type:"disabled"}.
+ * So the primary path is native JSON outputs (output_config.format with our JSON schema), with up-front thinking off
+ * via {type:"between_tools"}. If a model rejects either, we read the API's error, adapt, and remember the working setup:
+ * a different thinking value it names, or a fallback to an optional tool call / JSON in the text.
  */
-const g = globalThis as unknown as { __hwThinking?: Record<string, unknown> | null };
+type Mode = "json" | "tool";
+const g = globalThis as unknown as { __hwAi?: { thinking: Record<string, unknown> | null; mode: Mode } };
+
+function parseLooseJson(text: string): unknown {
+  const t = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  try {
+    return JSON.parse(t);
+  } catch {
+    const a = t.indexOf("{");
+    const b = t.lastIndexOf("}");
+    return a >= 0 && b > a ? JSON.parse(t.slice(a, b + 1)) : null;
+  }
+}
 
 async function callTool<T>(p: { system: string; user: string; tool: string; schema: object; zod: ZodType<T, ZodTypeDef, unknown>; maxTokens?: number }): Promise<T> {
   if (!aiEnabled()) throw new AiError("ai_not_configured");
   const url = process.env.AI_API_URL || "https://api.anthropic.com/v1/messages";
+  const state = (g.__hwAi ||= { thinking: { type: "between_tools" }, mode: "json" });
   let lastErr = "";
-  let thinking: Record<string, unknown> | null = g.__hwThinking === undefined ? { type: "disabled" } : g.__hwThinking;
-  let forced = true;
   let failures = 0;
-  for (let attempt = 0; attempt < 5 && failures < 2; attempt++) {
+  for (let attempt = 0; attempt < 6 && failures < 2; attempt++) {
     try {
       const body: Record<string, unknown> = {
         model: process.env.AI_MODEL || "claude-sonnet-5-5",
         max_tokens: p.maxTokens ?? 8000,
         system: p.system,
-        tools: [{ name: p.tool, description: "Return the result in this exact structure.", input_schema: p.schema }],
-        tool_choice: forced ? { type: "tool", name: p.tool } : { type: "any" },
-        messages: [{ role: "user", content: forced ? p.user : `${p.user}\n\nAnswer only by calling the tool "${p.tool}".` }],
+        messages: [{ role: "user", content: state.mode === "json" ? p.user : `${p.user}\n\nReturn the result by calling the tool "${p.tool}" once.` }],
       };
-      if (thinking) body.thinking = thinking;
+      if (state.mode === "json") body.output_config = { format: { type: "json_schema", schema: p.schema } };
+      else {
+        body.tools = [{ name: p.tool, description: "Return the result in this exact structure.", input_schema: p.schema }];
+        body.tool_choice = { type: "auto" };
+      }
+      if (state.thinking) body.thinking = state.thinking;
       const res = await fetch(url, {
         method: "POST",
         headers: { "x-api-key": String(process.env.ANTHROPIC_API_KEY), "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -45,32 +61,42 @@ async function callTool<T>(p: { system: string; user: string; tool: string; sche
       const text = await res.text();
       if (!res.ok) {
         lastErr = `http ${res.status}: ${text.slice(0, 300)}`;
-        if (res.status === 400 && /thinking/i.test(text)) {
-          // Use the value the API asks for; if it names none, send no thinking setting at all
-          const m = text.match(/send\s*\\?"thinking\\?"\s*:\s*\{\s*\\?"type\\?"\s*:\s*\\?"([a-z_]+)\\?"/i);
-          const next = m ? { type: m[1] } : null;
-          if (JSON.stringify(next) !== JSON.stringify(thinking)) {
-            thinking = next;
-            g.__hwThinking = next;
+        if (res.status === 400) {
+          if (/thinking/i.test(text)) {
+            const m = text.match(/send\s*\\?"thinking\\?"\s*:\s*\{\s*\\?"type\\?"\s*:\s*\\?"([a-z_]+)\\?"/i);
+            const next = m ? { type: m[1] } : null;
+            if (JSON.stringify(next) !== JSON.stringify(state.thinking)) {
+              state.thinking = next;
+              continue;
+            }
+          }
+          if (state.mode === "json" && /output_config|format|json_schema|schema/i.test(text)) {
+            state.mode = "tool";
             continue;
           }
-          if (forced) {
-            forced = false; // forced tool choice may be incompatible with thinking on this model
-            continue;
-          }
+          break;
         }
-        if (res.status === 400 || res.status === 401 || res.status === 403) break;
+        if (res.status === 401 || res.status === 403) break;
         failures++;
         continue;
       }
-      const data = JSON.parse(text) as { content?: { type: string; name?: string; input?: unknown }[]; stop_reason?: string };
-      const block = data.content?.find((b) => b.type === "tool_use" && b.name === p.tool);
-      if (!block) {
-        lastErr = `no tool output (stop: ${data.stop_reason})`;
+      const data = JSON.parse(text) as { content?: { type: string; name?: string; input?: unknown; text?: string }[]; stop_reason?: string };
+      const toolBlock = data.content?.find((b) => b.type === "tool_use" && b.name === p.tool);
+      const textOut = (data.content || []).filter((b) => b.type === "text").map((b) => b.text || "").join("");
+      let value: unknown = toolBlock?.input;
+      if (value === undefined && textOut) {
+        try {
+          value = parseLooseJson(textOut);
+        } catch {
+          value = undefined;
+        }
+      }
+      if (value === undefined || value === null) {
+        lastErr = `no structured output (stop: ${data.stop_reason})`;
         failures++;
         continue;
       }
-      const parsed = p.zod.safeParse(block.input);
+      const parsed = p.zod.safeParse(value);
       if (parsed.success) return parsed.data;
       lastErr = `invalid output: ${parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`;
       failures++;
